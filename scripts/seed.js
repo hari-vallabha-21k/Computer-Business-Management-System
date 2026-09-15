@@ -40,10 +40,13 @@ const PRODUCTS = [
 ];
 
 const CUSTOMERS = [
-  ['Rahul Kumar', '9876543210', 'rahul@example.com', '12 MG Road, Pune', ''],
-  ['Sunrise Enterprises', '9820011223', 'accounts@sunrise.example', 'Plot 4, MIDC, Pune', '27AABCS1429B1ZX'],
-  ['Priya Sharma', '9812345678', 'priya@example.com', '7 Lake View, Pune', ''],
-  ['Nova Tech Services', '9900112233', 'buy@novatech.example', 'IT Park, Hinjewadi', '27AAECN5522F1ZP'],
+  ['Rahul Kumar', '9876543210', 'rahul@example.com', '12 MG Road, Secunderabad, Hyderabad 500003', '', ''],
+  ['Skyline Auto Components Pvt Ltd', '9820011223', 'accounts@skylineauto.example',
+    '2nd Floor, SBI Colony, Gandhi Nagar, Secunderabad, Hyderabad, Telangana, 500080',
+    '36AAACS1234A1Z5', 'Phase II, IDA, Cherlapally, Hyderabad 500051'],
+  ['Priya Sharma', '9812345678', 'priya@example.com', '7 Lake View, Kompally, Hyderabad 500014', '', ''],
+  ['Nova Tech Services', '9900112233', 'buy@novatech.example', 'IT Park, Madhapur, Hyderabad 500081',
+    '27AAECN5522F1ZP', ''],
 ];
 
 const SUPPLIERS = [
@@ -61,19 +64,27 @@ function seed() {
   const admin = createUser({ name: 'Business Owner', email: 'owner@example.com', password: 'owner123', role: 'ADMIN' });
   createUser({ name: 'Sales Staff', email: 'staff@example.com', password: 'staff123', role: 'STAFF' });
 
-  db.prepare(`UPDATE business_settings SET name = ?, address = ?, phone = ?, email = ?, gstin = ?, state_code = '27',
-    upi_id = ?, qr_mode = 'INVOICE_INFO', terms = ?, bank_details = ? WHERE id = 1`)
-    .run('Vallabha Computers', 'Shop 12, Tech Plaza, FC Road, Pune 411004', '+91 98765 43210',
-      'sales@vallabhacomputers.example', '27AAAPV1234C1ZK', 'vallabhacomputers@upi',
-      'Goods once sold are covered by manufacturer warranty only. Subject to Pune jurisdiction.',
-      'Bank: HDFC Bank | A/C: 50200012345678 | IFSC: HDFC0001234');
+  db.prepare(`UPDATE business_settings SET name = ?, address = ?, phone = ?, email = ?, gstin = ?,
+    state_code = '36', state_name = 'Telangana', invoice_prefix = 'TCS', upi_id = ?, qr_mode = 'INVOICE_INFO', terms = ?,
+    bank_account_name = ?, bank_account_no = ?, bank_branch_ifsc = ?, signatory_name = ?,
+    invoice_no_format = ?, default_payment_terms = 'Due on Receipt', price_includes_gst = 1
+    WHERE id = 1`)
+    .run('Thirumala Computer Services',
+      'H.No 43-261/1, Hanuman Nagar, Moulali, Kapra, Hyderabad, Medchal Malkajgiri, 500040.',
+      '+91 98765 43210', 'sales@thirumalacomputers.example', '36AXIPK2327D1ZR', 'thirumalacomputers@upi',
+      '1. Goods warranty covers as per the manufacturer terms\n'
+      + '2. Physical damage of product must be checked on arrival.\n'
+      + '3. Warranty does not cover damage from electrical burning.',
+      'Thirumala Computer Services', '50200000000000', 'Moulali, HDFC0000000',
+      'Thirumala Computer Services', 'TCS/{MM}{YY}/{SEQ4}');
 
   for (const [code, description, rate] of HSN) {
     db.prepare('INSERT INTO hsn_codes (code, description, gst_rate) VALUES (?, ?, ?)').run(code, description, rate);
   }
-  for (const [name, phone, email, address, gstin] of CUSTOMERS) {
-    db.prepare('INSERT INTO customers (name, phone, email, address, gstin) VALUES (?, ?, ?, ?, ?)')
-      .run(name, phone, email, address, gstin);
+  for (const [name, phone, email, address, gstin, shipping] of CUSTOMERS) {
+    db.prepare(`INSERT INTO customers (name, phone, email, address, gstin, shipping_address, state_code)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(name, phone, email, address, gstin, shipping || '', gstin.slice(0, 2));
   }
   for (const [name, phone, email, address, gstin] of SUPPLIERS) {
     db.prepare('INSERT INTO suppliers (name, phone, email, address, gstin) VALUES (?, ?, ?, ?, ?)')
@@ -118,22 +129,31 @@ function seed() {
     [4, daysAgo(1), [['MON-001', 2], ['SSD-001', 1]]],
   ];
 
-  const customerIds = db.prepare('SELECT id FROM customers ORDER BY id').all().map((r) => r.id);
-  let counter = 1000;
+  const customers = db.prepare('SELECT * FROM customers ORDER BY id').all();
+  const { lineTotals } = require('../server/lib/gst');
+  const { placeOfSupply } = require('../server/lib/states');
+  const business = db.prepare('SELECT * FROM business_settings WHERE id = 1').get();
+  let counter = 52;
   for (const [customerIndex, date, lines] of SALES) {
-    const customerId = customerIds[customerIndex - 1];
+    const customer = customers[customerIndex - 1];
     tx(() => {
       counter += 1;
-      const invoiceNo = `INV-${counter}`;
+      const invoiceNo = `TCS/${date.slice(5, 7)}${date.slice(2, 4)}/${String(counter).padStart(4, '0')}`;
       const invoiceId = Number(db.prepare(`
-        INSERT INTO invoices (invoice_no, customer_id, invoice_date, status, payment_mode, created_by)
-        VALUES (?, ?, ?, 'DRAFT', 'CASH', ?)`).run(invoiceNo, customerId, date, admin.id).lastInsertRowid);
+        INSERT INTO invoices (invoice_no, customer_id, invoice_date, status, payment_mode, created_by,
+          payment_terms, due_date, place_of_supply, ship_to_name, ship_to_address, price_includes_gst)
+        VALUES (?, ?, ?, 'DRAFT', 'CASH', ?, 'Due on Receipt', ?, ?, ?, ?, 1)`)
+        .run(invoiceNo, customer.id, date, admin.id, date,
+          placeOfSupply(customer.state_code || business.state_code), customer.name,
+          customer.shipping_address || customer.address).lastInsertRowid);
       let subtotal = 0;
       let gst = 0;
       for (const [code, qty] of lines) {
         const p = pick(code);
-        const taxable = p.selling_price * qty;
-        const gstAmount = Math.round(taxable * p.gst_rate) / 100;
+        // Selling prices are GST-inclusive, as on the client's own invoices.
+        const t = lineTotals({ qty, unitPrice: p.selling_price, gstRate: p.gst_rate, priceIncludesGst: true });
+        const taxable = t.taxable;
+        const gstAmount = t.gstAmount;
         subtotal += taxable;
         gst += gstAmount;
         const hsnCode = db.prepare('SELECT code FROM hsn_codes WHERE id = ?').get(p.hsn_id).code;
@@ -142,7 +162,7 @@ function seed() {
             gst_rate, gst_amount, taxable_value, total, cost_price)
           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`)
           .run(invoiceId, p.id, p.name, hsnCode, qty, p.selling_price, p.gst_rate, gstAmount, taxable,
-            taxable + gstAmount, p.purchase_price).lastInsertRowid);
+            t.total, p.purchase_price).lastInsertRowid);
         if (p.serial_tracked) {
           const serials = db.prepare("SELECT id FROM serial_numbers WHERE product_id = ? AND status = 'AVAILABLE' LIMIT ?")
             .all(p.id, qty);
@@ -151,8 +171,7 @@ function seed() {
       }
       db.prepare('UPDATE invoices SET subtotal = ?, gst_amount = ?, cgst = ?, sgst = ?, total = ? WHERE id = ?')
         .run(subtotal, gst, gst / 2, gst / 2, subtotal + gst, invoiceId);
-      db.prepare('UPDATE counters SET value = ? WHERE name = ?').run(counter, 'INV');
-      db.prepare("INSERT INTO counters (name, value) VALUES ('INV', ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value")
+      db.prepare("INSERT INTO counters (name, value) VALUES ('TCS', ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value")
         .run(counter);
       issueInvoice(invoiceId, admin.id);
       db.prepare('UPDATE invoices SET invoice_date = ?, issued_at = ? WHERE id = ?').run(date, `${date} 11:00:00`, invoiceId);

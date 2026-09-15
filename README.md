@@ -45,7 +45,7 @@ password-holder in **Settings → Users** before using this with real data.
 Requires Node.js 22.5 or newer (it uses the built-in `node:sqlite`).
 
 ```bash
-npm test          # 24 tests covering the business rules
+npm test          # 31 tests: business rules, scanning, and the invoice template
 npm run dev       # auto-restarting dev server
 ```
 
@@ -59,9 +59,11 @@ server/
   index.js            HTTP server, route wiring, error handling, first-admin bootstrap
   db.js               Schema, transactions, document numbering
   lib/inventory.js    The one place stock ever changes; writes the ledger
-  lib/gst.js          Line and invoice maths, CGST/SGST vs IGST
+  lib/gst.js          Line and invoice maths, GST-inclusive rates, CGST/SGST vs IGST
+  lib/states.js       GST state codes -> place of supply
+  lib/numberwords.js  Amount in words, Indian numbering
   lib/extract.js      Purchase-invoice reading and product matching
-  lib/invoicedoc.js   PDF invoice + QR payloads
+  lib/invoicedoc.js   Template PDF invoice + QR payloads
   lib/auth.js         Password hashing, signed session tokens, role gates
   routes/             products, hsn, inventory, purchases, invoices, returns,
                       parties (customers/suppliers), analytics, reports, misc
@@ -100,6 +102,9 @@ product page shows both and flags any mismatch. Movement types: `OPENING`, `PURC
 | 9 | Extracted invoice data never changes inventory before the user confirms. |
 | 10 | Every inventory change is logged with user, reference and reason. |
 
+The database upgrades itself in place on startup, so an existing installation picks up the
+invoice-template columns without a manual migration step.
+
 Cancelling an issued invoice restores the stock and releases its serial numbers.
 
 ### Purchase-invoice scanning
@@ -111,7 +116,9 @@ the user presses **Confirm & Add to Inventory**.
 
 What it can read, entirely locally with no external service:
 
-- PDFs **with a text layer** (content streams are inflated and the text operators read)
+- PDFs **with a text layer** — content streams are inflated and both literal and hex show-text
+  operands are decoded, so ordinary single-byte-encoded PDFs (including the ones this system
+  generates) come back as text
 - CSV / TSV / plain-text invoices, either delimited or `… <hsn> <qty> <rate> <amount>` rows
 
 What it cannot read: a photo or a scanned image of a paper invoice — there is no text
@@ -129,9 +136,37 @@ Try it with `samples/sample-supplier-invoice.txt` or `samples/sample-supplier-in
 
 ### Invoices, GST and QR
 
-Prices are GST-exclusive and discounts apply per line. Tax splits CGST/SGST, or IGST when
-the customer's GSTIN state code differs from the business's. Invoices download as a
-generated PDF and print from the browser.
+The invoice follows the GST tax-invoice template supplied by the business, on screen and
+in the generated PDF:
+
+```
+Seller block (name, address, GSTIN)                         TAX INVOICE
+Invoice No. / Invoice Date / Terms / Due Date    Place Of Supply / Payment
+Bill To                                          Ship To
+# | Item & Description | HSN | Qty | Rate | Total Incl GST | Taxable Amount | 9% CGST | 9% SGST
+Sub Total                          Items Total / Total
+Product Brief
+Total In words
+Bank Details          QR          For <Business> / Authorized Signatory
+Terms and Conditions
+Declaration
+```
+
+**Prices can include GST.** With *Selling prices include GST* on (the default, matching the
+template), a rate of ₹55,500 x 2 prints as ₹1,11,000 incl GST, ₹94,067.80 taxable and
+₹8,466.10 each of CGST and SGST — the tax is backed out of the quoted price. With it off,
+GST is added on top. The setting lives in Settings → Pricing & Stock Rules and is recorded
+on each invoice, so old invoices keep the basis they were raised on.
+
+Tax splits CGST/SGST, or becomes IGST when the customer's GSTIN state code differs from the
+business's; *Place of Supply* is derived from the same code (`36` → `Telangana(36)`).
+*Terms* such as "Net 30" set the due date automatically. The amount is written out in Indian
+numbering ("Rupees One Lakh Thirteen Thousand Only"). Invoices download as a generated PDF
+and print from the browser.
+
+**Invoice numbering** follows a configurable format with the tokens `{PREFIX}`, `{SEQ}`,
+`{SEQ3}`–`{SEQ6}`, `{MM}`, `{YY}`, `{YYYY}` and `{FY}` — `TCS/{MM}{YY}/{SEQ4}` produces
+`TCS/0826/0053`.
 
 The invoice QR code is configurable in Settings:
 
@@ -171,6 +206,10 @@ Errors always come back as JSON with a readable `error` message, and stock failu
 include `details` (requested vs available) so the UI can suggest the fix.
 
 ## Scope
+
+The invoice layout, its column set and its GST-inclusive arithmetic come from the tax
+invoice template supplied by the business; demo data uses that layout with placeholder
+bank and customer details.
 
 Delivered: the whole of Phase 1 (authentication, dashboard, products, HSN, inventory,
 purchases, sales, customers, suppliers, invoice generation with automatic stock

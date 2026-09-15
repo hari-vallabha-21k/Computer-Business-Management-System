@@ -49,6 +49,7 @@
                 <label>Phone<input name="phone" value="${esc(record.phone || '')}"></label>
                 <label>Email<input name="email" value="${esc(record.email || '')}"></label>
                 <label class="full">Address<textarea name="address">${esc(record.address || '')}</textarea></label>
+                ${kind === 'customers' ? `<label class="full">Shipping Address (if different)<textarea name="shipping_address">${esc(record.shipping_address || '')}</textarea></label>` : ''}
                 <label>GSTIN<input name="gstin" value="${esc(record.gstin || '')}"></label>
               </div>`,
             onConfirm: (root) => window.api.put(`/api/${kind}/${record.id}`, formValues(root)),
@@ -70,6 +71,7 @@
               <div><div class="small muted">Email</div><strong>${esc(record.email || '-')}</strong></div>
               <div><div class="small muted">GSTIN</div><strong>${esc(record.gstin || '-')}</strong></div>
               <div class="full"><div class="small muted">Address</div>${esc(record.address || '-')}</div>
+              ${record.shipping_address ? `<div class="full"><div class="small muted">Shipping Address</div>${esc(record.shipping_address)}</div>` : ''}
             </div>
             ${table(history, [
             { key: 'doc_no', label: kind === 'customers' ? 'Invoice' : 'Purchase' },

@@ -25,6 +25,8 @@ async function start() {
   baseUrl = `http://127.0.0.1:${server.address().port}`;
   tokens.admin = (await api('POST', '/api/auth/login', { email: 'owner@test.local', password: 'owner123' })).body.token;
   tokens.staff = (await api('POST', '/api/auth/login', { email: 'staff@test.local', password: 'staff123' })).body.token;
+  // Most tests assert GST-exclusive maths; the inclusive mode has its own suite.
+  await api('PUT', '/api/settings', { price_includes_gst: false, gstin: '27AAAPV1234C1ZK' }, 'admin');
   return baseUrl;
 }
 

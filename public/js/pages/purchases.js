@@ -160,7 +160,7 @@
           const line = state.lines[Number(input.dataset.i)];
           const field = input.dataset.field;
           line[field] = input.type === 'number' ? Number(input.value) : input.value.trim();
-          renderLines();
+          setTimeout(renderLines, 0);
         });
       });
       linesHost.querySelectorAll('[data-remove]').forEach((btn) => btn.addEventListener('click', () => {

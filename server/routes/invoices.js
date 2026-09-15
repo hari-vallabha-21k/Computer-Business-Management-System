@@ -4,13 +4,15 @@ const { db, tx, nextNumber, settings } = require('../db');
 const { AppError, wrap, num, str, required, round2, today } = require('../lib/util');
 const inv = require('../lib/inventory');
 const { lineTotals, invoiceTotals } = require('../lib/gst');
+const { placeOfSupply, stateCode } = require('../lib/states');
 
 const router = express.Router();
 
 function loadInvoice(id) {
   const invoice = db.prepare(`
     SELECT i.*, c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email,
-           c.address AS customer_address, c.gstin AS customer_gstin, u.name AS created_by_name
+           c.address AS customer_address, c.gstin AS customer_gstin,
+           c.shipping_address AS customer_shipping_address, u.name AS created_by_name
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
     LEFT JOIN users u ON u.id = i.created_by
@@ -28,7 +30,7 @@ function loadInvoice(id) {
 }
 
 /** Build persisted line rows from the request payload, pulling defaults off the product master. */
-function buildLines(rawItems) {
+function buildLines(rawItems, priceIncludesGst) {
   if (!Array.isArray(rawItems) || !rawItems.length) throw new AppError('Add at least one product to the invoice.', 422);
   return rawItems.map((raw) => {
     const product = db.prepare(`
@@ -45,7 +47,7 @@ function buildLines(rawItems) {
     if (product.serial_tracked && serials.length && serials.length !== qty) {
       throw new AppError(`${product.name} needs exactly ${qty} serial number(s); ${serials.length} supplied.`, 422);
     }
-    const totals = lineTotals({ qty, unitPrice, discount, gstRate });
+    const totals = lineTotals({ qty, unitPrice, discount, gstRate, priceIncludesGst });
     return {
       product, qty, unitPrice, discount, gstRate, serials,
       description: str(raw.description) || product.name,
@@ -98,24 +100,52 @@ router.get('/:id', wrap((req, res) => {
   res.json({ invoice, items, business: settings() });
 }));
 
+/** Due date = invoice date + n days; blank terms mean payment on receipt. */
+function dueDateFor(invoiceDate, terms) {
+  const match = String(terms || '').match(/(\d+)/);
+  if (!match) return invoiceDate;
+  const d = new Date(`${invoiceDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + Number(match[1]));
+  return d.toISOString().slice(0, 10);
+}
+
+/** Where the supply is taxed: the customer's state, falling back to the business's. */
+function placeOfSupplyFor(customer, business) {
+  const code = (customer && (stateCode(customer.gstin) || customer.state_code))
+    || stateCode(business.gstin) || business.state_code;
+  return placeOfSupply(code);
+}
+
 // POST /api/invoices - create DRAFT (no stock movement) or ISSUED directly
 router.post('/', wrap((req, res) => {
   const b = req.body;
+  const business = settings();
   const status = str(b.status, 'DRAFT').toUpperCase();
   if (!['DRAFT', 'ISSUED'].includes(status)) throw new AppError('Status must be DRAFT or ISSUED.', 422);
-  const lines = buildLines(b.items);
+  const priceIncludesGst = b.price_includes_gst === undefined
+    ? !!business.price_includes_gst : !!b.price_includes_gst;
+  const lines = buildLines(b.items, priceIncludesGst);
   const customer = b.customer_id
     ? db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(b.customer_id))
     : null;
   if (b.customer_id && !customer) throw new AppError('Customer not found.', 404);
 
   const out = tx(() => {
-    const invoiceNo = nextNumber(settings().invoice_prefix || 'INV');
+    const invoiceNo = nextNumber(business.invoice_prefix || 'INV', 1001, business.invoice_no_format);
+    const invoiceDate = str(b.invoice_date) || today();
+    const terms = str(b.payment_terms) || business.default_payment_terms || 'Due on Receipt';
     const invoiceId = Number(db.prepare(`
-      INSERT INTO invoices (invoice_no, customer_id, invoice_date, status, payment_mode, payment_status, notes, created_by)
-      VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?)`)
-      .run(invoiceNo, customer ? customer.id : null, str(b.invoice_date) || today(),
-        str(b.payment_mode, 'CASH'), str(b.payment_status, 'PAID'), str(b.notes), req.user.id).lastInsertRowid);
+      INSERT INTO invoices (invoice_no, customer_id, invoice_date, status, payment_mode, payment_status, notes,
+        payment_terms, due_date, place_of_supply, ship_to_name, ship_to_address, product_brief,
+        price_includes_gst, created_by)
+      VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(invoiceNo, customer ? customer.id : null, invoiceDate,
+        str(b.payment_mode, 'CASH'), str(b.payment_status, 'PAID'), str(b.notes),
+        terms, str(b.due_date) || dueDateFor(invoiceDate, terms),
+        str(b.place_of_supply) || placeOfSupplyFor(customer, business),
+        str(b.ship_to_name) || (customer ? customer.name : ''),
+        str(b.ship_to_address) || (customer ? (customer.shipping_address || customer.address) : ''),
+        str(b.product_brief), priceIncludesGst ? 1 : 0, req.user.id).lastInsertRowid);
     const saved = persistLines(invoiceId, lines);
     saveTotals(invoiceId, saved, customer ? customer.gstin : '');
     if (status === 'ISSUED') issueInvoice(invoiceId, req.user.id);
@@ -130,15 +160,27 @@ router.put('/:id', wrap((req, res) => {
   const existing = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
   if (!existing) throw new AppError('Invoice not found.', 404);
   if (existing.status !== 'DRAFT') throw new AppError('Only draft invoices can be edited.', 409);
-  const lines = buildLines(req.body.items);
+  const business = settings();
+  const priceIncludesGst = req.body.price_includes_gst === undefined
+    ? !!existing.price_includes_gst : !!req.body.price_includes_gst;
+  const lines = buildLines(req.body.items, priceIncludesGst);
   const customer = req.body.customer_id
     ? db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(req.body.customer_id)) : null;
 
   const out = tx(() => {
-    db.prepare(`UPDATE invoices SET customer_id = ?, invoice_date = ?, payment_mode = ?, payment_status = ?, notes = ?
-      WHERE id = ?`).run(customer ? customer.id : null, str(req.body.invoice_date) || existing.invoice_date,
-      str(req.body.payment_mode, existing.payment_mode), str(req.body.payment_status, existing.payment_status),
-      str(req.body.notes, existing.notes), id);
+    const invoiceDate = str(req.body.invoice_date) || existing.invoice_date;
+    const terms = str(req.body.payment_terms, existing.payment_terms);
+    db.prepare(`UPDATE invoices SET customer_id = ?, invoice_date = ?, payment_mode = ?, payment_status = ?, notes = ?,
+      payment_terms = ?, due_date = ?, place_of_supply = ?, ship_to_name = ?, ship_to_address = ?, product_brief = ?,
+      price_includes_gst = ? WHERE id = ?`)
+      .run(customer ? customer.id : null, invoiceDate,
+        str(req.body.payment_mode, existing.payment_mode), str(req.body.payment_status, existing.payment_status),
+        str(req.body.notes, existing.notes), terms,
+        str(req.body.due_date) || dueDateFor(invoiceDate, terms),
+        str(req.body.place_of_supply) || placeOfSupplyFor(customer, business),
+        str(req.body.ship_to_name) || (customer ? customer.name : ''),
+        str(req.body.ship_to_address) || (customer ? (customer.shipping_address || customer.address) : ''),
+        str(req.body.product_brief, existing.product_brief), priceIncludesGst ? 1 : 0, id);
     const saved = persistLines(id, lines);
     saveTotals(id, saved, customer ? customer.gstin : '');
     return loadInvoice(id);

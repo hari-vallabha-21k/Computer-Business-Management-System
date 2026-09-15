@@ -39,7 +39,7 @@ test('Invoice totals apply GST and discounts per line', async () => {
     items: [{ product_id: product.id, qty: 2, discount: 200 }],
   }, 'admin');
   const { invoice } = res.body;
-  assert.equal(invoice.subtotal, 2000);
+  assert.equal(invoice.subtotal, 1800, 'subtotal is the taxable value, after discount');
   assert.equal(invoice.discount, 200);
   assert.equal(invoice.gst_amount, 324); // 18% of 1800
   assert.equal(invoice.total, 2124);

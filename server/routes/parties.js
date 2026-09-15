@@ -40,8 +40,14 @@ function partyRouter(table) {
   router.post('/', wrap((req, res) => {
     required(req.body, ['name']);
     const b = req.body;
-    const id = db.prepare(`INSERT INTO ${table} (name, phone, email, address, gstin) VALUES (?, ?, ?, ?, ?)`)
-      .run(str(b.name), str(b.phone), str(b.email), str(b.address), str(b.gstin).toUpperCase()).lastInsertRowid;
+    const gstin = str(b.gstin).toUpperCase();
+    const id = isCustomer
+      ? db.prepare(`INSERT INTO customers (name, phone, email, address, gstin, shipping_address, state_code)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(str(b.name), str(b.phone), str(b.email), str(b.address), gstin,
+          str(b.shipping_address), gstin.slice(0, 2) || str(b.state_code)).lastInsertRowid
+      : db.prepare('INSERT INTO suppliers (name, phone, email, address, gstin) VALUES (?, ?, ?, ?, ?)')
+        .run(str(b.name), str(b.phone), str(b.email), str(b.address), gstin).lastInsertRowid;
     res.status(201).json({ record: db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id) });
   }));
 
@@ -50,9 +56,14 @@ function partyRouter(table) {
     const current = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
     if (!current) throw new AppError('Record not found.', 404);
     const b = req.body;
+    const gstin = str(b.gstin, current.gstin).toUpperCase();
     db.prepare(`UPDATE ${table} SET name = ?, phone = ?, email = ?, address = ?, gstin = ? WHERE id = ?`)
       .run(str(b.name, current.name) || current.name, str(b.phone, current.phone), str(b.email, current.email),
-        str(b.address, current.address), str(b.gstin, current.gstin).toUpperCase(), id);
+        str(b.address, current.address), gstin, id);
+    if (isCustomer) {
+      db.prepare('UPDATE customers SET shipping_address = ?, state_code = ? WHERE id = ?')
+        .run(str(b.shipping_address, current.shipping_address), gstin.slice(0, 2) || str(b.state_code, current.state_code), id);
+    }
     res.json({ record: db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id) });
   }));
 

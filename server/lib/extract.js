@@ -15,6 +15,16 @@ const { round2, similarity, normalise } = require('./util');
 const TEXT_EXT = new Set(['.txt', '.csv', '.tsv']);
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.tif', '.tiff', '.bmp']);
 
+/** Decode a PDF hex string; single-byte codes cover WinAnsi/Standard encodings. */
+function fromHex(hex) {
+  const clean = String(hex || '').replace(/\s+/g, '');
+  if (!clean) return '';
+  const bytes = clean.length % 2 ? `${clean}0` : clean;
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 2) out += String.fromCharCode(parseInt(bytes.slice(i, i + 2), 16));
+  return out;
+}
+
 /** Pull readable text out of a PDF: inflate content streams and collect show-text operands. */
 function pdfText(buffer) {
   const chunks = [];
@@ -33,15 +43,20 @@ function pdfText(buffer) {
     if (!/(Tj|TJ)/.test(content)) continue;
 
     const lines = [];
-    const textRe = /\[((?:[^\]\\]|\\.)*)\]\s*TJ|\(((?:[^)\\]|\\.)*)\)\s*Tj|T\*|ET/g;
+    // Show-text operators carry either literal (strings) or <hex> strings;
+    // both appear inside TJ arrays too. T* and ET end the current line.
+    const textRe = /\[((?:[^\]\\]|\\.)*)\]\s*TJ|\(((?:[^)\\]|\\.)*)\)\s*Tj|<([0-9A-Fa-f\s]*)>\s*Tj|T\*|ET/g;
     let t;
     let current = '';
     while ((t = textRe.exec(content)) !== null) {
       if (t[1] !== undefined) {
-        const parts = [...t[1].matchAll(/\(((?:[^)\\]|\\.)*)\)/g)].map((p) => p[1]);
+        const parts = [...t[1].matchAll(/\(((?:[^)\\]|\\.)*)\)|<([0-9A-Fa-f\s]*)>/g)]
+          .map((p) => (p[1] !== undefined ? p[1] : fromHex(p[2])));
         current += parts.join('');
       } else if (t[2] !== undefined) {
         current += t[2];
+      } else if (t[3] !== undefined) {
+        current += fromHex(t[3]);
       } else {
         if (current.trim()) lines.push(current);
         current = '';

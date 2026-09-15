@@ -30,6 +30,11 @@
               <option>CASH</option><option>UPI</option><option>CARD</option><option>BANK TRANSFER</option><option>CREDIT</option>
             </select></label>
             <label>Payment Status<select name="payment_status"><option>PAID</option><option>UNPAID</option><option>PARTIAL</option></select></label>
+            <label>Terms<input name="payment_terms" list="terms-list" placeholder="Due on Receipt">
+              <datalist id="terms-list"><option>Due on Receipt</option><option>Net 15</option><option>Net 30</option><option>Net 45</option></datalist></label>
+            <label>Due Date<input name="due_date" type="date"></label>
+            <label class="full">Ship To (leave blank to use the customer address)
+              <input name="ship_to_address" placeholder="Delivery address"></label>
             <label class="full">Notes<input name="notes"></label>
           </div>
         </div>
@@ -40,8 +45,12 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-head"><h2>Invoice Items</h2><span class="muted small" id="stock-note"></span></div>
+        <div class="card-head"><h2>Invoice Items</h2>
+          <span class="muted small" id="price-mode"></span>
+          <span class="muted small" id="stock-note"></span></div>
         <div id="lines"></div>
+        <label style="margin-top:12px">Product Brief (specifications and serial numbers printed under the items)
+          <textarea name="product_brief" rows="2"></textarea></label>
       </div>
       <div class="btn-row">
         <button class="btn" id="save-draft">Save as Draft</button>
@@ -68,11 +77,19 @@
       renderLines();
     }
 
+    // Mirrors server/lib/gst.js: the rate either includes GST or has it added.
+    const inclusive = () => !!(window.api.state.business && window.api.state.business.price_includes_gst);
+
     function lineTotals(l) {
       const gross = l.qty * l.unitPrice;
-      const taxable = Math.max(gross - l.discount, 0);
-      const gst = taxable * l.product.gst_rate / 100;
-      return { gross, taxable, gst, total: taxable + gst };
+      const net = Math.max(gross - l.discount, 0);
+      const rate = Number(l.product.gst_rate) || 0;
+      if (inclusive()) {
+        const taxable = net / (1 + rate / 100);
+        return { gross, taxable, gst: net - taxable, total: net };
+      }
+      const gst = net * rate / 100;
+      return { gross, taxable: net, gst, total: net + gst };
     }
 
     function renderLines() {
@@ -107,7 +124,7 @@
         host.querySelectorAll('[data-field]').forEach((input) => input.addEventListener('change', () => {
           const line = state.lines[Number(input.dataset.i)];
           line[input.dataset.field] = Number(input.value) || 0;
-          renderLines();
+          setTimeout(renderLines, 0);
         }));
         host.querySelectorAll('[data-remove]').forEach((btn) => btn.addEventListener('click', () => {
           state.lines.splice(Number(btn.dataset.remove), 1);
@@ -165,7 +182,7 @@
     function renderTotals() {
       const totals = state.lines.reduce((acc, l) => {
         const t = lineTotals(l);
-        acc.subtotal += t.gross;
+        acc.subtotal += t.taxable;
         acc.discount += l.discount;
         acc.gst += t.gst;
         acc.total += t.total;
@@ -176,7 +193,7 @@
         && state.customer.gstin.slice(0, 2) !== window.api.state.business.gstin.slice(0, 2);
       view.querySelector('#totals').innerHTML = `
         <table>
-          <tr><th>Subtotal</th><td class="num">${money(totals.subtotal)}</td></tr>
+          <tr><th>Taxable Value</th><td class="num">${money(totals.subtotal)}</td></tr>
           ${totals.discount ? `<tr><th>Discount</th><td class="num">− ${money(totals.discount)}</td></tr>` : ''}
           ${interState
         ? `<tr><th>IGST</th><td class="num">${money(totals.gst)}</td></tr>`
@@ -184,6 +201,12 @@
              <tr><th>SGST</th><td class="num">${money(totals.gst / 2)}</td></tr>`}
           <tr><th>Total</th><td class="num"><strong style="font-size:17px">${money(totals.total)}</strong></td></tr>
         </table>`;
+      const modeNote = view.querySelector('#price-mode');
+      if (modeNote) {
+        modeNote.textContent = inclusive()
+          ? 'Rates include GST - tax is backed out of the price.'
+          : 'Rates exclude GST - tax is added on top.';
+      }
       const short = state.lines.filter((l) => l.qty > l.product.stock);
       view.querySelector('#stock-note').innerHTML = short.length
         ? `<span class="error">⚠ ${short.length} line(s) exceed available stock</span>` : '';
@@ -195,6 +218,10 @@
       invoice_date: view.querySelector('[name=invoice_date]').value,
       payment_mode: view.querySelector('[name=payment_mode]').value,
       payment_status: view.querySelector('[name=payment_status]').value,
+      payment_terms: view.querySelector('[name=payment_terms]').value,
+      due_date: view.querySelector('[name=due_date]').value,
+      ship_to_address: view.querySelector('[name=ship_to_address]').value,
+      product_brief: view.querySelector('[name=product_brief]').value,
       notes: view.querySelector('[name=notes]').value,
       items: state.lines.map((l) => ({
         product_id: l.product.id, qty: l.qty, unit_price: l.unitPrice, discount: l.discount, serials: l.serials,
@@ -246,6 +273,10 @@
       }
       view.querySelector('[name=invoice_date]').value = data.invoice.invoice_date;
       view.querySelector('[name=notes]').value = data.invoice.notes || '';
+      view.querySelector('[name=payment_terms]').value = data.invoice.payment_terms || '';
+      view.querySelector('[name=due_date]').value = data.invoice.due_date || '';
+      view.querySelector('[name=ship_to_address]').value = data.invoice.ship_to_address || '';
+      view.querySelector('[name=product_brief]').value = data.invoice.product_brief || '';
       for (const item of data.items) {
         const { product } = await window.api.get(`/api/products/${item.product_id}`);
         state.lines.push({
@@ -299,6 +330,15 @@
     const { invoice: inv, items, business } = await window.api.get(`/api/invoices/${id}`);
     const qr = await window.api.get(`/api/invoices/${id}/qr`).catch(() => ({ dataUrl: null }));
     const interState = inv.igst > 0;
+    const gstRate = items.length ? Number(items[0].gst_rate) : 18;
+    const halfRate = Math.round((gstRate / 2) * 100) / 100;
+    const unitsTotal = items.reduce((s, it) => s + Number(it.qty), 0);
+    const bankLines = [
+      business.bank_account_name ? `Account Name : ${business.bank_account_name}` : '',
+      business.bank_account_no ? `A/c No : ${business.bank_account_no}` : '',
+      business.bank_branch_ifsc ? `Br &amp; IFSC : ${business.bank_branch_ifsc}` : '',
+      (!business.bank_account_name && business.bank_details) ? business.bank_details : '',
+    ].filter(Boolean);
 
     view.innerHTML = `
       <div class="page-head">
@@ -317,60 +357,123 @@
       ${inv.status === 'DRAFT' ? '<div class="alert warn">This is a draft. Inventory has not been reduced yet.</div>' : ''}
       ${inv.status === 'CANCELLED' ? `<div class="alert error">Cancelled${inv.cancel_reason ? `: ${esc(inv.cancel_reason)}` : ''}. Stock was restored.</div>` : ''}
 
-      <div class="card invoice-preview">
-        <div class="head">
+      <div class="invoice-sheet">
+        <div class="inv-box inv-seller">
           <div>
-            <h2>${esc(business.name)}</h2>
+            <div class="inv-business">${esc(business.name)}</div>
             <div class="small muted">${esc(business.address || '')}</div>
-            <div class="small muted">${esc([business.phone, business.email].filter(Boolean).join(' · '))}</div>
-            ${business.gstin ? `<div class="small muted">GSTIN: ${esc(business.gstin)}</div>` : ''}
+            <div class="small muted">${esc([business.phone, business.email].filter(Boolean).join('  |  '))}</div>
+            ${business.gstin ? `<div class="small"><strong>GSTIN ${esc(business.gstin)}</strong></div>` : ''}
           </div>
-          <div class="right">
-            <h2>TAX INVOICE</h2>
-            <div class="small">No: <strong>${esc(inv.invoice_no)}</strong></div>
-            <div class="small">Date: ${date(inv.invoice_date)}</div>
-            <div class="small">Payment: ${esc(inv.payment_mode || '-')} (${esc(inv.payment_status || '-')})</div>
-          </div>
+          <div class="inv-title">${inv.status === 'CANCELLED' ? 'TAX INVOICE (CANCELLED)' : 'TAX INVOICE'}</div>
         </div>
 
-        <div style="margin:18px 0">
-          <div class="small muted">Bill To</div>
-          <strong>${esc(inv.customer_name || 'Walk-in Customer')}</strong>
-          <div class="small muted">${esc(inv.customer_address || '')}</div>
-          <div class="small muted">${esc(inv.customer_phone || '')}${inv.customer_gstin ? ` · GSTIN ${esc(inv.customer_gstin)}` : ''}</div>
-        </div>
-
-        ${table(items, [
-      { key: 'description', label: 'Description', render: (r) => `${esc(r.description)}${r.serials && r.serials.length ? `<div class="small muted">S/N: ${esc(r.serials.join(', '))}</div>` : ''}` },
-      { key: 'hsn_code', label: 'HSN' },
-      { key: 'qty', label: 'Qty', num: true },
-      { key: 'unit_price', label: 'Rate', num: true, render: (r) => money(r.unit_price) },
-      { key: 'discount', label: 'Disc', num: true, render: (r) => money(r.discount) },
-      { key: 'gst_rate', label: 'GST%', num: true, render: (r) => `${r.gst_rate}%` },
-      { key: 'total', label: 'Amount', num: true, render: (r) => money(r.total) },
-    ])}
-
-        <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:18px">
-          ${qr.dataUrl ? `<div class="qr-box"><img src="${qr.dataUrl}" alt="Invoice QR code">
-            <div class="small muted">${qr.mode === 'PAYMENT_UPI' ? 'Scan to pay' : 'Scan for invoice details'}</div></div>` : ''}
-          <div class="grow small muted">
-            ${business.bank_details ? `<div>${esc(business.bank_details)}</div>` : ''}
-            ${inv.notes ? `<div>Notes: ${esc(inv.notes)}</div>` : ''}
-            ${business.terms ? `<div style="margin-top:6px">${esc(business.terms)}</div>` : ''}
-          </div>
-          <table class="totals">
-            <tr><th>Subtotal</th><td class="num">${money(inv.subtotal)}</td></tr>
-            ${inv.discount ? `<tr><th>Discount</th><td class="num">− ${money(inv.discount)}</td></tr>` : ''}
-            ${interState
-        ? `<tr><th>IGST</th><td class="num">${money(inv.igst)}</td></tr>`
-        : `<tr><th>CGST</th><td class="num">${money(inv.cgst)}</td></tr><tr><th>SGST</th><td class="num">${money(inv.sgst)}</td></tr>`}
-            <tr><th style="font-size:16px">Total</th><td class="num"><strong style="font-size:16px">${money(inv.total)}</strong></td></tr>
+        <div class="inv-box inv-split">
+          <table class="inv-meta">
+            <tr><th>Invoice No.</th><td>${esc(inv.invoice_no)}</td></tr>
+            <tr><th>Invoice Date</th><td>${date(inv.invoice_date)}</td></tr>
+            <tr><th>Terms</th><td>${esc(inv.payment_terms || business.default_payment_terms || 'Due on Receipt')}</td></tr>
+            <tr><th>Due Date</th><td>${date(inv.due_date || inv.invoice_date)}</td></tr>
+          </table>
+          <table class="inv-meta">
+            <tr><th>Place Of Supply</th><td>${esc(inv.place_of_supply || '-')}</td></tr>
+            <tr><th>Payment</th><td>${esc(inv.payment_mode || '-')} (${esc(inv.payment_status || '-')})</td></tr>
           </table>
         </div>
+
+        <div class="inv-box inv-split">
+          <div>
+            <div class="inv-label">Bill To</div>
+            <strong>${esc(inv.customer_name || 'Walk-in Customer')}</strong>
+            <div class="small muted">${esc(inv.customer_address || '')}</div>
+            ${inv.customer_gstin ? `<div class="small"><strong>GSTIN ${esc(inv.customer_gstin)}</strong></div>` : ''}
+          </div>
+          <div>
+            <div class="inv-label">Ship To</div>
+            <strong>${esc(inv.ship_to_name || inv.customer_name || 'Walk-in Customer')}</strong>
+            <div class="small muted">${esc(inv.ship_to_address || inv.customer_shipping_address || inv.customer_address || '')}</div>
+            ${inv.customer_phone ? `<div class="small">Phone ${esc(inv.customer_phone)}</div>` : ''}
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="inv-items">
+            <thead>
+              <tr>
+                <th>#</th><th>Item &amp; Description</th><th>HSN</th>
+                <th class="num">Qty</th><th class="num">Rate</th><th class="num">Total Incl GST</th>
+                <th class="num">Taxable Amount</th>
+                ${interState
+    ? `<th class="num">${gstRate}% IGST<div class="small">Amount</div></th>`
+    : `<th class="num">${halfRate}% CGST<div class="small">Amount</div></th>
+                   <th class="num">${halfRate}% SGST<div class="small">Amount</div></th>`}
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map((item, i) => `
+                <tr>
+                  <td>${i + 1}</td>
+                  <td>${esc(item.description)}
+                    ${item.serials && item.serials.length ? `<div class="small muted">S/N: ${esc(item.serials.join(', '))}</div>` : ''}</td>
+                  <td>${esc(item.hsn_code || '-')}</td>
+                  <td class="num">${qty(item.qty)}</td>
+                  <td class="num">${money(item.unit_price)}</td>
+                  <td class="num">${money(item.total)}</td>
+                  <td class="num">${money(item.taxable_value)}</td>
+                  ${interState
+    ? `<td class="num">${money(item.gst_amount)}</td>`
+    : `<td class="num">${money(item.gst_amount / 2)}</td><td class="num">${money(item.gst_amount / 2)}</td>`}
+                </tr>`).join('')}
+              <tr class="inv-subtotal">
+                <td></td><td>Sub Total</td><td></td><td></td><td></td>
+                <td class="num">${money(inv.total)}</td>
+                <td class="num">${money(inv.subtotal)}</td>
+                ${interState
+    ? `<td class="num">${money(inv.igst)}</td>`
+    : `<td class="num">${money(inv.cgst)}</td><td class="num">${money(inv.sgst)}</td>`}
+              </tr>
+              <tr class="inv-grand">
+                <td></td><td>Items Total ${qty(unitsTotal)}</td>
+                <td colspan="${interState ? 4 : 5}"></td>
+                <td class="num">Total</td>
+                <td class="num"><strong>${money(inv.total)}</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        ${inv.product_brief ? `<div class="inv-section"><div class="inv-label">Product Brief</div>
+          <div class="small">${esc(inv.product_brief).replace(/\n/g, '<br>')}</div></div>` : ''}
+
+        <div class="inv-section">
+          <div class="inv-label">Total In words</div>
+          <em>${esc(window.ui.rupeesInWords(inv.total))}</em>
+        </div>
+
+        <div class="inv-footer">
+          <div>
+            ${bankLines.length ? `<div class="inv-label">Bank Details</div>
+              <div class="small muted">${bankLines.join('<br>')}</div>` : ''}
+            ${inv.notes ? `<div class="small muted" style="margin-top:6px">Notes: ${esc(inv.notes)}</div>` : ''}
+          </div>
+          ${qr.dataUrl ? `<div class="qr-box"><img src="${qr.dataUrl}" alt="Invoice QR code">
+            <div class="small muted">${qr.mode === 'PAYMENT_UPI' ? 'Scan to pay' : 'Scan for invoice details'}</div></div>` : ''}
+          <div class="inv-sign">
+            <strong>For ${esc(business.name)}</strong>
+            <div class="inv-sign-space"></div>
+            <div class="small muted">${esc(business.signatory_name || '')}</div>
+            <div class="small">Authorized Signatory</div>
+          </div>
+        </div>
+
+        ${business.terms ? `<div class="inv-section"><div class="inv-label">Terms and Conditions</div>
+          <div class="small muted">${esc(business.terms).replace(/\n/g, '<br>')}</div></div>` : ''}
+        ${business.declaration ? `<div class="inv-section"><div class="inv-label">Declaration</div>
+          <div class="small muted">${esc(business.declaration)}</div></div>` : ''}
       </div>`;
 
     view.querySelector('#pdf').addEventListener('click',
-      () => window.api.download(`/api/invoices/${id}/pdf`, {}, `${inv.invoice_no}.pdf`).catch(errorToast));
+      () => window.api.download(`/api/invoices/${id}/pdf`, {}, `${inv.invoice_no.replace(/\//g, '-')}.pdf`).catch(errorToast));
     view.querySelector('#print').addEventListener('click', () => window.print());
 
     const issueBtn = view.querySelector('#issue');
@@ -406,6 +509,7 @@
       });
     }
   }
+
 
   // ---------- Returns ----------
   async function returns(view) {

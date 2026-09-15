@@ -242,6 +242,39 @@ CREATE TABLE IF NOT EXISTS counters (
 `;
 
 db.exec(SCHEMA);
+
+/**
+ * Add a column to an existing table if it is not there yet, so databases
+ * created by an earlier version upgrade in place on startup.
+ */
+function ensureColumn(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!columns.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+// Fields matching the client's GST tax invoice layout.
+const MIGRATIONS = [
+  ['business_settings', 'price_includes_gst', "INTEGER NOT NULL DEFAULT 1"],
+  ['business_settings', 'state_name', "TEXT DEFAULT ''"],
+  ['business_settings', 'bank_account_name', "TEXT DEFAULT ''"],
+  ['business_settings', 'bank_account_no', "TEXT DEFAULT ''"],
+  ['business_settings', 'bank_branch_ifsc', "TEXT DEFAULT ''"],
+  ['business_settings', 'declaration', "TEXT DEFAULT 'We declare that this invoice shows the actual charges of the goods and services described and that all particulars are true and correct.'"],
+  ['business_settings', 'signatory_name', "TEXT DEFAULT ''"],
+  ['business_settings', 'invoice_no_format', "TEXT DEFAULT '{PREFIX}-{SEQ}'"],
+  ['business_settings', 'default_payment_terms', "TEXT DEFAULT 'Due on Receipt'"],
+  ['invoices', 'payment_terms', "TEXT DEFAULT ''"],
+  ['invoices', 'due_date', 'TEXT'],
+  ['invoices', 'place_of_supply', "TEXT DEFAULT ''"],
+  ['invoices', 'ship_to_name', "TEXT DEFAULT ''"],
+  ['invoices', 'ship_to_address', "TEXT DEFAULT ''"],
+  ['invoices', 'product_brief', "TEXT DEFAULT ''"],
+  ['invoices', 'price_includes_gst', 'INTEGER NOT NULL DEFAULT 0'],
+  ['customers', 'shipping_address', "TEXT DEFAULT ''"],
+  ['customers', 'state_code', "TEXT DEFAULT ''"],
+];
+for (const [table, column, definition] of MIGRATIONS) ensureColumn(table, column, definition);
+
 db.exec(`INSERT OR IGNORE INTO business_settings (id) VALUES (1)`);
 
 /** Run fn inside a SQLite transaction; rolls back on any throw. */
@@ -257,17 +290,38 @@ function tx(fn) {
   }
 }
 
-/** Next document number for a series, e.g. nextNumber('INV') -> 'INV-1001'. */
-function nextNumber(prefix, start = 1001) {
+/**
+ * Next document number for a series, e.g. nextNumber('INV') -> 'INV-1001'.
+ * `format` accepts the tokens {PREFIX}, {SEQ}, {SEQ3}..{SEQ6}, {MM}, {YY}, {YYYY}
+ * and {FY} (Indian financial year, e.g. 26-27), so a house style such as
+ * 'TCS/{MM}{YY}/{SEQ4}' produces TCS/0826/0053.
+ */
+function nextNumber(prefix, start = 1001, format = '') {
   const row = db.prepare('SELECT value FROM counters WHERE name = ?').get(prefix);
   const next = row ? row.value + 1 : start;
   db.prepare('INSERT INTO counters (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value')
     .run(prefix, next);
-  return `${prefix}-${next}`;
+  return formatNumber(format || '{PREFIX}-{SEQ}', prefix, next);
+}
+
+function formatNumber(format, prefix, seq) {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  // The Indian financial year starts in April.
+  const fyStart = now.getMonth() + 1 >= 4 ? yyyy : yyyy - 1;
+  return String(format)
+    .replace(/\{PREFIX\}/g, prefix)
+    .replace(/\{SEQ(\d)\}/g, (_, width) => String(seq).padStart(Number(width), '0'))
+    .replace(/\{SEQ\}/g, String(seq))
+    .replace(/\{MM\}/g, mm)
+    .replace(/\{YYYY\}/g, String(yyyy))
+    .replace(/\{YY\}/g, String(yyyy).slice(2))
+    .replace(/\{FY\}/g, `${String(fyStart).slice(2)}-${String(fyStart + 1).slice(2)}`);
 }
 
 function settings() {
   return db.prepare('SELECT * FROM business_settings WHERE id = 1').get();
 }
 
-module.exports = { db, tx, nextNumber, settings, DATA_DIR, DB_FILE };
+module.exports = { db, tx, nextNumber, formatNumber, settings, ensureColumn, DATA_DIR, DB_FILE };

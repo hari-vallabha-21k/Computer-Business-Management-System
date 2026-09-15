@@ -3,6 +3,7 @@ const express = require('express');
 const { db, settings } = require('../db');
 const { AppError, wrap, num, str, required } = require('../lib/util');
 const { login, createUser, requireRole } = require('../lib/auth');
+const { stateName } = require('../lib/states');
 
 const auth = express.Router();
 
@@ -63,13 +64,16 @@ settingsRouter.put('/', requireRole('ADMIN'), wrap((req, res) => {
   const current = settings();
   const b = req.body;
   const gstin = str(b.gstin, current.gstin).toUpperCase();
+  const stateCode = gstin.slice(0, 2) || str(b.state_code, current.state_code);
   db.prepare(`
     UPDATE business_settings SET name = ?, address = ?, phone = ?, email = ?, gstin = ?, state_code = ?,
-      invoice_prefix = ?, purchase_prefix = ?, return_prefix = ?, adjustment_prefix = ?,
-      allow_negative_stock = ?, qr_mode = ?, upi_id = ?, bank_details = ?, terms = ?, currency = ?
+      state_name = ?, invoice_prefix = ?, purchase_prefix = ?, return_prefix = ?, adjustment_prefix = ?,
+      allow_negative_stock = ?, qr_mode = ?, upi_id = ?, bank_details = ?, terms = ?, currency = ?,
+      price_includes_gst = ?, bank_account_name = ?, bank_account_no = ?, bank_branch_ifsc = ?,
+      declaration = ?, signatory_name = ?, invoice_no_format = ?, default_payment_terms = ?
     WHERE id = 1`)
     .run(str(b.name, current.name) || current.name, str(b.address, current.address), str(b.phone, current.phone),
-      str(b.email, current.email), gstin, gstin.slice(0, 2) || str(b.state_code, current.state_code),
+      str(b.email, current.email), gstin, stateCode, stateName(stateCode) || str(b.state_name, current.state_name),
       str(b.invoice_prefix, current.invoice_prefix) || current.invoice_prefix,
       str(b.purchase_prefix, current.purchase_prefix) || current.purchase_prefix,
       str(b.return_prefix, current.return_prefix) || current.return_prefix,
@@ -77,7 +81,13 @@ settingsRouter.put('/', requireRole('ADMIN'), wrap((req, res) => {
       b.allow_negative_stock === undefined ? current.allow_negative_stock : (b.allow_negative_stock ? 1 : 0),
       str(b.qr_mode, current.qr_mode).toUpperCase(), str(b.upi_id, current.upi_id),
       str(b.bank_details, current.bank_details), str(b.terms, current.terms),
-      str(b.currency, current.currency) || current.currency);
+      str(b.currency, current.currency) || current.currency,
+      b.price_includes_gst === undefined ? current.price_includes_gst : (b.price_includes_gst ? 1 : 0),
+      str(b.bank_account_name, current.bank_account_name), str(b.bank_account_no, current.bank_account_no),
+      str(b.bank_branch_ifsc, current.bank_branch_ifsc), str(b.declaration, current.declaration),
+      str(b.signatory_name, current.signatory_name),
+      str(b.invoice_no_format, current.invoice_no_format) || current.invoice_no_format,
+      str(b.default_payment_terms, current.default_payment_terms));
   res.json({ settings: settings() });
 }));
 
