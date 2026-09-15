@@ -4,7 +4,6 @@
  * suppliers, issued invoices and a return, so the dashboard has something
  * to show on a fresh install.
  */
-process.env.DB_FILE = process.env.DB_FILE || undefined;
 const { db, tx } = require('../server/db');
 const { createUser } = require('../server/lib/auth');
 const inv = require('../server/lib/inventory');

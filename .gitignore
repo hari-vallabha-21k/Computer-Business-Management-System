@@ -1,6 +1,6 @@
 node_modules/
-data/*.db
-data/*.db-journal
-data/uploads/
+data/*
+!data/.gitkeep
 .env
+*.log
 .DS_Store

@@ -1,0 +1,15 @@
+ABC Computers
+Wholesale Market, Lamington Road, Mumbai 400007
+GSTIN: 27AAACA1111A1Z5
+Phone: 9000011111
+
+TAX INVOICE
+Invoice No: ABC/26-27/1024
+Invoice Date: 10/09/2026
+
+Description | HSN | Qty | Rate | GST | Amount
+Intel Core i5 14400 | 84715000 | 10 | 18000 | 18 | 212400
+Kingston Fury 16GB DDR4 | 84733099 | 5 | 3400 | 18 | 20060
+Samsung 980 SSD 1TB | 85235290 | 3 | 5200 | 18 | 18408
+Corsair CV550 SMPS | 84733099 | 4 | 2900 | 18 | 13688
+Total | | | | | 264556
