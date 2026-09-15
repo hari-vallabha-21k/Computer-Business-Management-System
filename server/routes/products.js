@@ -135,6 +135,42 @@ router.post('/', requireRole('ADMIN'), wrap((req, res) => {
   res.status(201).json({ product });
 }));
 
+/**
+ * POST /api/products/bulk - create several products in one confirmed step,
+ * used by the "create products from scanned invoices" flow. Rows that match an
+ * existing product by name or barcode are skipped rather than duplicated
+ * (Rule 5), and the whole batch is one transaction.
+ */
+router.post('/bulk', requireRole('ADMIN'), wrap((req, res) => {
+  const rows = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!rows.length) throw new AppError('No products to create.', 422);
+
+  const out = tx(() => {
+    const created = [];
+    const skipped = [];
+    for (const row of rows) {
+      const name = str(row.name);
+      if (!name) { skipped.push({ name: '', reason: 'NO_NAME' }); continue; }
+      const existing = db.prepare('SELECT id, name FROM products WHERE lower(name) = lower(?) AND active = 1').get(name);
+      if (existing) { skipped.push({ name, reason: 'ALREADY_EXISTS', productId: existing.id }); continue; }
+
+      const hsn = resolveHsn(row.hsn_code, row.gst_rate);
+      const categoryId = row.category ? resolveCategory(row.category) : null;
+      const code = str(row.product_code) || generateCode(str(row.category));
+      const id = Number(db.prepare(`
+        INSERT INTO products (product_code, name, category_id, brand, model, hsn_id, gst_rate, purchase_price,
+          selling_price, min_stock, serial_tracked, barcode, description, stock)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+        .run(code, name, categoryId, str(row.brand), str(row.model), hsn ? hsn.id : null,
+          num(row.gst_rate, hsn ? hsn.gst_rate : 18), num(row.purchase_price), num(row.selling_price),
+          num(row.min_stock), row.serial_tracked ? 1 : 0, str(row.barcode), str(row.description)).lastInsertRowid);
+      created.push(db.prepare(`${SELECT} WHERE p.id = ?`).get(id));
+    }
+    return { created, skipped };
+  });
+  res.status(201).json({ ...out, createdCount: out.created.length, skippedCount: out.skipped.length });
+}));
+
 router.put('/:id', requireRole('ADMIN'), wrap((req, res) => {
   const id = Number(req.params.id);
   const current = db.prepare('SELECT * FROM products WHERE id = ?').get(id);

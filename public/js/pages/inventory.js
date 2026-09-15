@@ -110,9 +110,28 @@
   async function addProduct(view) {
     view.innerHTML = `
       <div class="page-head"><div><h1>Add Product</h1>
-        <p class="muted">Enter the details once - invoices reuse the HSN, GST and price automatically.</p></div></div>
+        <p class="muted">Upload supplier invoices to read the products off them, or type one in below.</p></div></div>
       ${tabs('add-product')}
+
+      <div class="card">
+        <div class="card-head"><h2>Add products from supplier invoices</h2>
+          <span class="muted small">Select one or more invoices - PDF, Excel, CSV or text</span></div>
+        <div class="filters">
+          <label class="grow">Invoice files
+            <input type="file" id="scan-files" accept=".pdf,.xlsx,.xlsm,.xltx,.txt,.csv,.tsv,image/*" multiple>
+          </label>
+          <button class="btn primary" id="scan-btn">Scan Invoices</button>
+        </div>
+        <p class="small muted" style="margin-top:8px">
+          Every product found across the selected invoices is listed for review. Nothing is saved until you confirm,
+          and products that already exist are skipped so nothing is duplicated.
+        </p>
+        <div id="scan-status"></div>
+        <div id="scan-results"></div>
+      </div>
+
       <form class="card" id="form">
+        <div class="card-head"><h2>Or add one product manually</h2></div>
         ${productForm(null)}
         <div class="btn-row" style="margin-top:14px">
           <button class="btn primary" type="submit">Save Product</button>
@@ -120,6 +139,7 @@
         </div>
       </form>`;
     await fillLists(view);
+    setupInvoiceScan(view);
 
     view.querySelector('#form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -372,6 +392,187 @@
     let timer;
     view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 200); });
     await load();
+  }
+
+  // ---------- Create products from scanned invoices ----------
+  const SCAN_WARNINGS = {
+    NO_PRODUCT_MATCH: 'New product',
+    LOW_CONFIDENCE_MATCH: 'Low confidence match - check the name',
+    HSN_NOT_IDENTIFIED: 'HSN could not be identified',
+    PRICE_NOT_IDENTIFIED: 'Purchase price could not be read',
+  };
+
+  /**
+   * Upload one or more supplier invoices, list every product found across
+   * them, and create the selected ones - optionally booking the quantities in
+   * as stock through the normal purchase flow.
+   */
+  function setupInvoiceScan(view) {
+    const statusHost = view.querySelector('#scan-status');
+    const resultsHost = view.querySelector('#scan-results');
+    let rows = [];
+    let invoices = [];
+
+    view.querySelector('#scan-btn').addEventListener('click', async () => {
+      const input = view.querySelector('#scan-files');
+      if (!input.files.length) { toast('Choose one or more invoice files first.', 'error'); return; }
+      const form = new FormData();
+      [...input.files].forEach((file) => form.append('files', file));
+      statusHost.innerHTML = `<div class="alert info">Reading ${input.files.length} invoice(s)…</div>`;
+      resultsHost.innerHTML = '';
+      try {
+        const data = await window.api.post('/api/purchases/extract', form);
+        const results = data.results || [data];
+        invoices = results;
+        const failed = results.filter((r) => !r.ok);
+        rows = [];
+        results.forEach((result, fileIndex) => {
+          (result.items || []).forEach((item) => {
+            rows.push({
+              fileIndex,
+              fileName: result.fileName,
+              selected: !item.match,
+              name: item.match ? item.match.name : item.description,
+              description: item.description,
+              productId: item.match ? item.match.productId : null,
+              matchScore: item.match ? item.match.score : 0,
+              category: '',
+              brand: '',
+              hsn: item.hsn || (item.match && item.match.hsn_code) || '',
+              gstRate: item.gstRate ?? 18,
+              qty: item.qty,
+              purchasePrice: item.unitPrice,
+              sellingPrice: Math.round(item.unitPrice * 1.15),
+              serials: [],
+              warnings: (item.needsVerification || []).map((w) => SCAN_WARNINGS[w] || w),
+            });
+          });
+        });
+
+        statusHost.innerHTML = `
+          <div class="alert ${rows.length ? 'success' : 'warn'}">
+            Read ${data.readCount ?? (results[0].ok ? 1 : 0)} of ${results.length} file(s) -
+            ${rows.length} product line(s) found.
+          </div>
+          ${failed.map((f) => `<div class="alert warn">⚠ ${esc(f.fileName)}: ${esc(f.message)}</div>`).join('')}`;
+        renderRows();
+      } catch (err) {
+        statusHost.innerHTML = `<div class="alert error">${esc(err.message)}</div>`;
+      }
+    });
+
+    function renderRows() {
+      if (!rows.length) { resultsHost.innerHTML = ''; return; }
+      const newCount = rows.filter((r) => r.selected).length;
+      resultsHost.innerHTML = `
+        <div class="card-head" style="margin-top:16px"><h3>Review products</h3>
+          <div class="actions">
+            <label class="check" style="margin:0"><input type="checkbox" id="select-all"> Select all new</label>
+          </div>
+        </div>
+        ${table(rows, [
+          { key: 'sel', label: '', render: (r, i) => `<input type="checkbox" data-sel="${i}" ${r.selected ? 'checked' : ''}>` },
+          {
+            key: 'name',
+            label: 'Product',
+            render: (r, i) => `<input style="min-width:200px" data-f="name" data-i="${i}" value="${esc(r.name)}">
+              <div class="small ${r.productId ? 'muted' : ''}">
+                ${r.productId
+    ? `Already in inventory (${Math.round(r.matchScore * 100)}% match) - will be skipped unless selected`
+    : 'New product'}
+                ${r.warnings.length ? `<span style="color:var(--warn)"> · ⚠ ${esc(r.warnings.join(', '))}</span>` : ''}
+              </div>
+              <div class="small muted">from ${esc(r.fileName)}</div>`,
+          },
+          { key: 'category', label: 'Category', render: (r, i) => `<input style="width:120px" list="category-list" data-f="category" data-i="${i}" value="${esc(r.category)}">` },
+          { key: 'brand', label: 'Brand', render: (r, i) => `<input style="width:110px" data-f="brand" data-i="${i}" value="${esc(r.brand)}">` },
+          { key: 'hsn', label: 'HSN', render: (r, i) => `<input style="width:96px" list="hsn-list" data-f="hsn" data-i="${i}" value="${esc(r.hsn)}">` },
+          { key: 'gstRate', label: 'GST %', num: true, render: (r, i) => `<input type="number" step="0.01" style="width:74px" data-f="gstRate" data-i="${i}" value="${r.gstRate}">` },
+          { key: 'qty', label: 'Qty', num: true, render: (r, i) => `<input type="number" step="1" style="width:70px" data-f="qty" data-i="${i}" value="${r.qty}">` },
+          { key: 'purchasePrice', label: 'Cost', num: true, render: (r, i) => `<input type="number" step="0.01" style="width:100px" data-f="purchasePrice" data-i="${i}" value="${r.purchasePrice}">` },
+          { key: 'sellingPrice', label: 'Selling', num: true, render: (r, i) => `<input type="number" step="0.01" style="width:100px" data-f="sellingPrice" data-i="${i}" value="${r.sellingPrice}">` },
+        ])}
+        <div class="btn-row" style="margin-top:14px">
+          <label class="check" style="margin:0"><input type="checkbox" id="also-stock" checked>
+            Also add these quantities as stock (records a purchase per invoice)</label>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn success" id="create-products">Create ${newCount} product(s)</button>
+          <span class="muted small">${rows.length - newCount} line(s) already exist and will be reused.</span>
+        </div>`;
+
+      resultsHost.querySelectorAll('[data-sel]').forEach((box) => box.addEventListener('change', () => {
+        rows[Number(box.dataset.sel)].selected = box.checked;
+        setTimeout(renderRows, 0);
+      }));
+      resultsHost.querySelectorAll('[data-f]').forEach((input) => input.addEventListener('change', () => {
+        const row = rows[Number(input.dataset.i)];
+        const field = input.dataset.f;
+        row[field] = input.type === 'number' ? Number(input.value) : input.value.trim();
+        if (field === 'purchasePrice') row.sellingPrice = Math.round(Number(input.value) * 1.15);
+        setTimeout(renderRows, 0);
+      }));
+      resultsHost.querySelector('#select-all').addEventListener('change', (e) => {
+        rows.forEach((r) => { if (!r.productId) r.selected = e.target.checked; });
+        renderRows();
+      });
+      resultsHost.querySelector('#create-products').addEventListener('click', () => confirmScan());
+    }
+
+    async function confirmScan() {
+      const addStock = resultsHost.querySelector('#also-stock').checked;
+      const chosen = rows.filter((r) => r.selected || (addStock && r.productId));
+      if (!chosen.length) { toast('Select at least one product.', 'error'); return; }
+
+      try {
+        if (!addStock) {
+          const payload = rows.filter((r) => r.selected).map((r) => ({
+            name: r.name, category: r.category, brand: r.brand, hsn_code: r.hsn,
+            gst_rate: r.gstRate, purchase_price: r.purchasePrice, selling_price: r.sellingPrice,
+          }));
+          const res = await window.api.post('/api/products/bulk', { items: payload });
+          toast(`${res.createdCount} product(s) created${res.skippedCount ? `, ${res.skippedCount} skipped as duplicates` : ''}.`, 'success');
+          window.location.hash = '#/inventory';
+          return;
+        }
+
+        // One purchase per invoice file, so stock and cost history stay per supplier bill.
+        let purchases = 0;
+        let products = 0;
+        for (let fileIndex = 0; fileIndex < invoices.length; fileIndex += 1) {
+          const invoice = invoices[fileIndex];
+          const lines = chosen.filter((r) => r.fileIndex === fileIndex);
+          if (!lines.length) continue;
+          const header = invoice.header || {};
+          const res = await window.api.post('/api/purchases', {
+            supplier_id: header.supplierMatch ? header.supplierMatch.supplierId : null,
+            supplier_name: header.supplierMatch ? '' : (header.supplier || ''),
+            supplier_gstin: header.supplierGstin || '',
+            supplier_invoice_no: header.invoiceNo || '',
+            invoice_date: header.invoiceDate || '',
+            source: 'SCAN',
+            file_name: invoice.fileName,
+            items: lines.map((r) => ({
+              product_id: r.productId || undefined,
+              description: r.name,
+              hsn_code: r.hsn,
+              qty: r.qty,
+              unit_price: r.purchasePrice,
+              gst_rate: r.gstRate,
+              new_product: r.productId ? undefined : {
+                name: r.name, category: r.category, brand: r.brand, hsn_code: r.hsn,
+                gst_rate: r.gstRate, selling_price: r.sellingPrice,
+              },
+            })),
+          });
+          purchases += 1;
+          products += lines.filter((r) => !r.productId).length;
+          if (!res.purchaseNo) throw new Error('The purchase could not be recorded.');
+        }
+        toast(`${products} product(s) created and stock added from ${purchases} invoice(s).`, 'success');
+        window.location.hash = '#/inventory';
+      } catch (err) { errorToast(err); }
+    }
   }
 
   // ---------- Product detail ----------

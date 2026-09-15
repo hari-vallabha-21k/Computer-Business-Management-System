@@ -11,8 +11,10 @@ const zlib = require('node:zlib');
 const path = require('node:path');
 const { db } = require('../db');
 const { round2, similarity, normalise } = require('./util');
+const { workbookToText } = require('./xlsx');
 
 const TEXT_EXT = new Set(['.txt', '.csv', '.tsv']);
+const SHEET_EXT = new Set(['.xlsx', '.xlsm', '.xltx']);
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.tif', '.tiff', '.bmp']);
 
 /** Decode a PDF hex string; single-byte codes cover WinAnsi/Standard encodings. */
@@ -74,6 +76,14 @@ function readText(buffer, filename) {
   const ext = path.extname(filename || '').toLowerCase();
   if (IMAGE_EXT.has(ext)) return { text: '', reason: 'IMAGE_NO_TEXT_LAYER' };
   if (TEXT_EXT.has(ext)) return { text: buffer.toString('utf8'), reason: null };
+  if (SHEET_EXT.has(ext) || buffer.subarray(0, 2).toString() === 'PK') {
+    try {
+      const text = workbookToText(buffer);
+      return { text, reason: text.trim() ? null : 'SHEET_EMPTY' };
+    } catch {
+      return { text: '', reason: 'UNSUPPORTED_FILE' };
+    }
+  }
   if (ext === '.pdf' || buffer.subarray(0, 4).toString() === '%PDF') {
     const text = pdfText(buffer);
     return { text, reason: text.trim() ? null : 'PDF_NO_TEXT_LAYER' };
@@ -98,9 +108,9 @@ function normaliseDate(value) {
 
 function findHeader(text) {
   const out = { supplier: '', invoiceNo: '', invoiceDate: '', supplierGstin: '' };
-  const invoiceNo = text.match(/(?:invoice|bill|inv)\s*(?:no|number|#)\s*[:.#-]?\s*([A-Za-z0-9/-]{3,})/i);
+  const invoiceNo = text.match(/(?:invoice|bill|inv)\s*(?:no|number|#)[\s:.#|-]*([A-Za-z0-9][A-Za-z0-9/-]{2,})/i);
   if (invoiceNo) out.invoiceNo = invoiceNo[1];
-  const date = text.match(/(?:invoice\s*)?date\s*[:.-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})/i);
+  const date = text.match(/(?:invoice\s*)?date[\s:.|-]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})/i);
   if (date) out.invoiceDate = normaliseDate(date[1]);
   const gstin = text.match(/\b(\d{2}[A-Z]{5}\d{4}[A-Z]\d[A-Z\d][A-Z\d])\b/);
   if (gstin) out.supplierGstin = gstin[1];
@@ -108,8 +118,10 @@ function findHeader(text) {
   if (supplier) {
     out.supplier = supplier[1].split(/[\n\r]/)[0].trim();
   } else {
-    const firstLine = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)[0];
-    if (firstLine && firstLine.length <= 60 && !/invoice/i.test(firstLine)) out.supplier = firstLine;
+    // Fall back to the first line that reads like a business name.
+    const firstLine = text.split(/\r?\n/).map((l) => l.trim())
+      .find((l) => l.length >= 3 && l.length <= 60 && /[A-Za-z]{3}/.test(l) && !/invoice|^gstin/i.test(l));
+    if (firstLine) out.supplier = firstLine;
   }
   return out;
 }
@@ -129,13 +141,16 @@ function findItems(text) {
     if (headerIdx >= 0) {
       const split = (l) => l.replace(/^\||\|$/g, '').split(/\s*[|,;\t]\s*/).map((c) => c.trim());
       const header = split(delimited[headerIdx]).map((h) => h.toLowerCase());
-      const col = (...names) => header.findIndex((h) => names.some((n) => h.includes(n)));
-      const iName = col('description', 'product', 'item', 'particular');
-      const iHsn = col('hsn');
-      const iQty = col('qty', 'quantity');
-      const iRate = col('rate', 'price', 'unit');
-      const iGst = col('gst', 'tax');
-      const iAmount = col('amount', 'total', 'value');
+      const col = (names, exclude = []) => header.findIndex((h) => names.some((n) => h.includes(n))
+        && !exclude.some((n) => h.includes(n)));
+      const iName = col(['description', 'product', 'item', 'particular']);
+      const iHsn = col(['hsn']);
+      const iQty = col(['qty', 'quantity']);
+      // "Rate" is the unit price; "Total Incl GST" and "Taxable Amount" are line values,
+      // and a GST column only counts when it carries a rate, not an amount.
+      const iRate = col(['rate', 'price', 'unit'], ['total', 'amount', 'value', 'taxable']);
+      const iGst = col(['gst', 'tax'], ['total', 'amount', 'value', 'taxable', 'incl', 'cgst', 'sgst', 'igst']);
+      const iAmount = col(['amount', 'total', 'value'], ['taxable', 'cgst', 'sgst', 'igst']);
       for (const row of delimited.slice(headerIdx + 1)) {
         const cells = split(row);
         if (cells.length < 3) continue;
@@ -174,12 +189,15 @@ function findItems(text) {
 function matchProduct(description, hsn) {
   const products = db.prepare(`
     SELECT p.*, h.code AS hsn_code FROM products p LEFT JOIN hsn_codes h ON h.id = p.hsn_id WHERE p.active = 1`).all();
+  const FLOOR = 0.35;
   const scored = products.map((p) => {
     let score = similarity(description, `${p.name} ${p.brand} ${p.model}`);
-    if (hsn && p.hsn_code === hsn) score = round2(Math.min(1, score + 0.1));
+    // A shared HSN strengthens a plausible match but must not create one:
+    // two unrelated laptops share an HSN, and that is not the same product.
+    if (hsn && p.hsn_code === hsn && score >= FLOOR) score = round2(Math.min(1, score + 0.1));
     if (normalise(p.name) === normalise(description)) score = 1;
     return { product: p, score };
-  }).filter((s) => s.score >= 0.35).sort((a, b) => b.score - a.score);
+  }).filter((s) => s.score >= FLOOR).sort((a, b) => b.score - a.score);
   return scored.slice(0, 3);
 }
 

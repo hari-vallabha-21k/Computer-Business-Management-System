@@ -44,26 +44,42 @@ router.get('/:id', wrap((req, res) => {
 }));
 
 /**
- * POST /api/purchases/extract - upload a supplier invoice and get a review payload.
- * Nothing is written to inventory here; the user confirms on POST /api/purchases.
+ * POST /api/purchases/extract - upload one or more supplier invoices and get a
+ * review payload for each. Nothing is written to inventory here; the user
+ * confirms on POST /api/purchases.
+ *
+ * Files arrive under "file" or "files"; the response always carries `results`,
+ * and a single upload is also spread at the top level.
  */
-router.post('/extract', upload.single('file'), wrap((req, res) => {
-  if (!req.file) throw new AppError('Please choose an invoice file to upload.', 422);
-  const result = extractPurchaseInvoice(req.file.buffer, req.file.originalname);
-  result.fileName = req.file.originalname;
-  if (!result.ok) {
-    db.prepare(`INSERT INTO notifications (level, type, message, link)
-      VALUES ('WARN', 'SCAN_FAILED', ?, '#/purchases/add')`)
-      .run(`Invoice "${req.file.originalname}" could not be read automatically: ${result.message}`);
-    return res.status(200).json(result);
-  }
-  const flagged = result.items.filter((i) => i.needsVerification.length).length;
-  if (flagged) {
-    db.prepare(`INSERT INTO notifications (level, type, message, link)
-      VALUES ('WARN', 'VERIFY', ?, '#/purchases/add')`)
-      .run(`${flagged} scanned invoice item(s) require verification.`);
-  }
-  res.json(result);
+router.post('/extract', upload.any(), wrap((req, res) => {
+  const files = (req.files || []).filter((f) => ['file', 'files', 'files[]'].includes(f.fieldname));
+  if (!files.length) throw new AppError('Please choose at least one invoice file to upload.', 422);
+
+  const results = files.map((file) => {
+    const result = extractPurchaseInvoice(file.buffer, file.originalname);
+    result.fileName = file.originalname;
+    if (!result.ok) {
+      db.prepare(`INSERT INTO notifications (level, type, message, link)
+        VALUES ('WARN', 'SCAN_FAILED', ?, '#/purchases/add')`)
+        .run(`Invoice "${file.originalname}" could not be read automatically: ${result.message}`);
+      return result;
+    }
+    const flagged = result.items.filter((i) => i.needsVerification.length).length;
+    if (flagged) {
+      db.prepare(`INSERT INTO notifications (level, type, message, link)
+        VALUES ('WARN', 'VERIFY', ?, '#/purchases/add')`)
+        .run(`${flagged} item(s) from "${file.originalname}" require verification.`);
+    }
+    return result;
+  });
+
+  const summary = {
+    results,
+    fileCount: results.length,
+    readCount: results.filter((r) => r.ok).length,
+    itemCount: results.reduce((n, r) => n + r.items.length, 0),
+  };
+  res.json(results.length === 1 ? { ...results[0], ...summary } : summary);
 }));
 
 /**

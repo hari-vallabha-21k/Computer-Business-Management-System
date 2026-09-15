@@ -86,14 +86,16 @@
       <div class="card">
         <div class="card-head"><h2>1. Upload supplier invoice (optional)</h2></div>
         <div class="filters">
-          <label class="grow">Invoice file
-            <input type="file" id="file" accept=".pdf,.txt,.csv,.tsv,image/*">
+          <label class="grow">Invoice file(s)
+            <input type="file" id="file" accept=".pdf,.xlsx,.xlsm,.xltx,.txt,.csv,.tsv,image/*" multiple>
           </label>
           <button class="btn primary" id="scan">Read Invoice</button>
         </div>
         <p class="small muted" style="margin-top:8px">
-          PDFs with a text layer, CSV and text invoices are read automatically. A photo or scan of a paper invoice has no
-          text to read - the form below stays available for manual entry. Nothing is added to inventory until you confirm.
+          PDFs with a text layer, Excel workbooks, CSV and text invoices are read automatically. A photo or scan of a
+          paper invoice has no text to read - the form below stays available for manual entry. Select several invoices
+          and they are queued: each one is reviewed and confirmed as its own purchase. Nothing is added to inventory
+          until you confirm.
         </p>
         <div id="scan-status"></div>
       </div>
@@ -118,7 +120,7 @@
         </div>
       </form>`;
 
-    const state = { supplierId: null, supplierName: '', lines: [], fileName: '' };
+    const state = { supplierId: null, supplierName: '', lines: [], fileName: '', queue: [], queueIndex: 0 };
 
     partySearch(view.querySelector('#supplier-pick'), 'suppliers', (s) => {
       state.supplierId = s.id;
@@ -246,38 +248,54 @@
     view.querySelector('#scan').addEventListener('click', async () => {
       const input = view.querySelector('#file');
       const status = view.querySelector('#scan-status');
-      if (!input.files.length) { toast('Choose an invoice file first.', 'error'); return; }
-      status.innerHTML = '<div class="alert info">Reading the invoice…</div>';
+      if (!input.files.length) { toast('Choose at least one invoice file first.', 'error'); return; }
+      status.innerHTML = `<div class="alert info">Reading ${input.files.length} invoice(s)…</div>`;
       const form = new FormData();
-      form.append('file', input.files[0]);
+      [...input.files].forEach((file) => form.append('files', file));
       try {
-        const result = await window.api.post('/api/purchases/extract', form);
-        state.fileName = result.fileName || input.files[0].name;
-        if (!result.ok) {
-          status.innerHTML = `<div class="alert warn">⚠ ${esc(result.message)}</div>`;
-          applyHeader(result.header || {});
+        const data = await window.api.post('/api/purchases/extract', form);
+        state.queue = (data.results || [data]).filter((r) => r.ok);
+        const failed = (data.results || [data]).filter((r) => !r.ok);
+        state.queueIndex = 0;
+        if (!state.queue.length) {
+          status.innerHTML = failed.map((f) => `<div class="alert warn">⚠ ${esc(f.fileName)}: ${esc(f.message)}</div>`).join('');
           return;
         }
-        status.innerHTML = `<div class="alert success">Invoice read. Review the ${result.items.length} item(s) below before confirming.</div>
-          ${(result.warnings || []).map((w) => `<div class="alert warn">⚠ ${esc(w)}</div>`).join('')}`;
-        applyHeader(result.header);
-        state.lines = result.items.map((item) => ({
-          description: item.description,
-          productId: item.match ? item.match.productId : null,
-          matchName: item.match ? item.match.name : '',
-          matchScore: item.match ? item.match.score : 0,
-          hsn: item.hsn || (item.match && item.match.hsn_code) || '',
-          qty: item.qty,
-          unitPrice: item.unitPrice,
-          gstRate: item.gstRate ?? 18,
-          serials: [],
-          warnings: (item.needsVerification || []).map(warningLabel),
-        }));
-        renderLines();
+        status.innerHTML = failed.map((f) => `<div class="alert warn">⚠ ${esc(f.fileName)}: ${esc(f.message)}</div>`).join('');
+        loadFromQueue();
       } catch (err) {
         status.innerHTML = `<div class="alert error">${esc(err.message)}</div>`;
       }
     });
+
+    /** Load the queued invoice at state.queueIndex into the form for review. */
+    function loadFromQueue() {
+      const status = view.querySelector('#scan-status');
+      const result = state.queue[state.queueIndex];
+      const position = state.queue.length > 1
+        ? `<div class="alert info">Invoice ${state.queueIndex + 1} of ${state.queue.length}:
+             <strong>${esc(result.fileName)}</strong>. Confirm it to move on to the next.</div>` : '';
+      status.innerHTML = position
+        + `<div class="alert success">Invoice read. Review the ${result.items.length} item(s) below before confirming.</div>`
+        + (result.warnings || []).map((w) => `<div class="alert warn">⚠ ${esc(w)}</div>`).join('');
+
+      state.fileName = result.fileName;
+      applyHeader(result.header || {});
+      state.lines = result.items.map((item) => ({
+        description: item.description,
+        productId: item.match ? item.match.productId : null,
+        matchName: item.match ? item.match.name : '',
+        matchScore: item.match ? item.match.score : 0,
+        hsn: item.hsn || (item.match && item.match.hsn_code) || '',
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        gstRate: item.gstRate ?? 18,
+        serials: [],
+        warnings: (item.needsVerification || []).map(warningLabel),
+      }));
+      renderLines();
+      view.querySelector('#lines').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
 
     function applyHeader(header) {
       if (header.invoiceNo) view.querySelector('[name=supplier_invoice_no]').value = header.invoiceNo;
@@ -325,6 +343,14 @@
           })),
         });
         toast(`Purchase ${res.purchaseNo} confirmed. Inventory updated.`, 'success');
+        if (state.queueIndex + 1 < state.queue.length) {
+          state.queueIndex += 1;
+          state.lines = [];
+          state.supplierId = null;
+          view.querySelector('#supplier-pick input').value = '';
+          loadFromQueue();
+          return;
+        }
         window.location.hash = '#/purchases';
       } catch (err) { errorToast(err); }
     });

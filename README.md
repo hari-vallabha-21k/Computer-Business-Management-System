@@ -45,7 +45,7 @@ password-holder in **Settings → Users** before using this with real data.
 Requires Node.js 22.5 or newer (it uses the built-in `node:sqlite`).
 
 ```bash
-npm test          # 31 tests: business rules, scanning, and the invoice template
+npm test          # 38 tests: business rules, scanning, multi-invoice, invoice template
 npm run dev       # auto-restarting dev server
 ```
 
@@ -63,6 +63,7 @@ server/
   lib/states.js       GST state codes -> place of supply
   lib/numberwords.js  Amount in words, Indian numbering
   lib/extract.js      Purchase-invoice reading and product matching
+  lib/xlsx.js         Minimal .xlsx reader (ZIP + sheet XML), no dependencies
   lib/invoicedoc.js   Template PDF invoice + QR payloads
   lib/auth.js         Password hashing, signed session tokens, role gates
   routes/             products, hsn, inventory, purchases, invoices, returns,
@@ -114,11 +115,22 @@ payload — it writes nothing. The UI shows the extracted header, the matched pr
 with a confidence score, and a per-line verification flag; inventory changes only when
 the user presses **Confirm & Add to Inventory**.
 
+Invoices can be uploaded **one at a time or many at once**, from two places:
+
+- **Inventory → Add Product** pools every product line found across all the selected
+  invoices into one review list. Lines that already match a product are marked and left
+  unticked; the rest are created in a single confirmed step, optionally booking their
+  quantities in as stock (one purchase per invoice, so cost history stays per supplier bill).
+- **Purchases → Add Purchase** queues the selected invoices and walks through them one at a
+  time — each is reviewed and confirmed as its own purchase.
+
 What it can read, entirely locally with no external service:
 
 - PDFs **with a text layer** — content streams are inflated and both literal and hex show-text
   operands are decoded, so ordinary single-byte-encoded PDFs (including the ones this system
   generates) come back as text
+- **Excel workbooks** (`.xlsx`) — the ZIP parts are inflated and the sheet XML read directly,
+  so an invoice kept as a spreadsheet is parsed like any other table
 - CSV / TSV / plain-text invoices, either delimited or `… <hsn> <qty> <rate> <amount>` rows
 
 What it cannot read: a photo or a scanned image of a paper invoice — there is no text
@@ -127,8 +139,9 @@ manual entry, and a notification is recorded. Wiring in an OCR or LLM extraction
 means replacing `readText()` in `server/lib/extract.js`; the review-and-confirm flow
 around it stays as is.
 
-Product matching is a token-overlap score that weights model numbers, with an HSN-match
-bonus and an exact-name override. Lines scoring below 0.75 are flagged for verification,
+Product matching is a token-overlap score that weights model numbers, with an exact-name
+override and a small bonus when the HSN also matches (only on a line that already looks
+like a match, so a shared HSN never invents one). Lines scoring below 0.75 are flagged for verification,
 and unmatched lines can either be pointed at an existing product or created as new ones
 on confirmation.
 
@@ -191,7 +204,7 @@ All endpoints live under `/api` and need a bearer token (or the session cookie) 
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` |
-| Products | `GET/POST /products`, `GET/PUT/DELETE /products/:id`, `GET /products/filters`, `POST /products/match` |
+| Products | `GET/POST /products`, `POST /products/bulk`, `GET/PUT/DELETE /products/:id`, `GET /products/filters`, `POST /products/match` |
 | HSN | `GET/POST /hsn`, `PUT/DELETE /hsn/:id` |
 | Inventory | `GET /inventory/movements`, `GET /inventory/low-stock`, `POST /inventory/add-stock`, `POST /inventory/adjust`, `GET/POST /inventory/serials` |
 | Purchases | `GET/POST /purchases`, `GET /purchases/:id`, `POST /purchases/extract` |
