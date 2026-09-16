@@ -9,12 +9,10 @@
   const tabs = (active) => `
     <div class="tabs">
       <a href="#/inventory" class="${active === 'products' ? 'active' : ''}">All Products</a>
-      <a href="#/inventory/add-product" class="${active === 'add-product' ? 'active' : ''}">Add Product</a>
-      <a href="#/inventory/add-stock" class="${active === 'add-stock' ? 'active' : ''}">Add Stock</a>
+      <a href="#/inventory/add-product" class="${active === 'add-product' ? 'active' : ''}">Add Product / Stock</a>
       <a href="#/inventory/movements" class="${active === 'movements' ? 'active' : ''}">Stock Movements</a>
       <a href="#/inventory/low-stock" class="${active === 'low-stock' ? 'active' : ''}">Low Stock</a>
-      <a href="#/inventory/serials" class="${active === 'serials' ? 'active' : ''}">Serial Numbers</a>
-      <a href="#/inventory/hsn" class="${active === 'hsn' ? 'active' : ''}">HSN</a>
+      <a href="#/inventory/tracking" class="${active === 'tracking' ? 'active' : ''}">Tracking & Codes</a>
     </div>`;
 
   const stockTag = (p) => `<span class="tag ${p.stock <= 0 ? 'red' : (p.min_stock > 0 && p.stock <= p.min_stock ? 'amber' : 'green')}">${qty(p.stock)}</span>`;
@@ -24,8 +22,7 @@
     view.innerHTML = `
       <div class="page-head"><div><h1>Inventory</h1><p class="muted">Search by name, brand, model, product ID, HSN or serial number.</p></div>
         <div class="actions">
-          <a class="btn" href="#/inventory/add-stock">Add Stock</a>
-          ${window.api.isAdmin() ? '<a class="btn primary" href="#/inventory/add-product">+ Add Product</a>' : ''}
+          <a class="btn primary" href="#/inventory/add-product">+ Add Product or Stock</a>
         </div>
       </div>
       ${tabs('products')}
@@ -65,6 +62,7 @@
           { key: 'selling_price', label: 'Price', num: true, render: (r) => money(r.selling_price) },
           { key: 'stock', label: 'Stock', num: true, render: stockTag },
           { key: 'serial_tracked', label: 'Serial', render: (r) => (r.serial_tracked ? '<span class="tag blue">Tracked</span>' : '') },
+          { key: 'actions', label: 'Action', render: (r) => `<button class="btn small danger delete-btn" data-id="${r.id}" data-name="${esc(r.name)}">Delete</button>` },
         ], { empty: 'No products match this search.' })}`;
       } catch (err) { host.innerHTML = `<div class="alert error">${esc(err.message)}</div>`; }
     };
@@ -72,6 +70,64 @@
     let timer;
     view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 200); });
     ['#category', '#brand', '#low'].forEach((sel) => view.querySelector(sel).addEventListener('change', load));
+    
+    view.addEventListener('click', (e) => {
+      const btn = e.target.closest('.delete-btn');
+      if (!btn) return;
+      const id = btn.dataset.id;
+      const name = btn.dataset.name;
+      modal({
+        title: 'Delete or Reduce Stock',
+        confirmLabel: false,
+        body: `
+          <form id="del-form">
+            <p><strong>${name}</strong></p>
+            <label class="check" style="margin-top:14px">
+              <input type="radio" name="action" value="delete" checked> Delete entire product (deactivate)
+            </label>
+            <label class="check">
+              <input type="radio" name="action" value="reduce"> Delete a certain number of stock
+            </label>
+            <label id="reduce-qty-label" style="display:none; margin-top:10px;">Quantity to delete
+              <input type="number" name="qty" min="1" step="1">
+            </label>
+            <div class="btn-row" style="margin-top:20px">
+              <button class="btn danger" type="submit">Confirm</button>
+            </div>
+          </form>
+        `,
+        onRender: (backdrop, close) => {
+          backdrop.querySelector('input[value="reduce"]').addEventListener('change', () => {
+            backdrop.querySelector('#reduce-qty-label').style.display = 'block';
+            backdrop.querySelector('input[name="qty"]').focus();
+          });
+          backdrop.querySelector('input[value="delete"]').addEventListener('change', () => {
+            backdrop.querySelector('#reduce-qty-label').style.display = 'none';
+          });
+          backdrop.querySelector('form').addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const vals = formValues(ev.target);
+            try {
+              if (vals.action === 'delete') {
+                if (!await confirm('Delete Product', 'Are you sure you want to completely delete this product?', 'Delete')) return;
+                await window.api.del('/api/products/' + id);
+                toast('Product deleted.');
+              } else {
+                const q = parseInt(vals.qty, 10);
+                if (!q) throw new Error('Enter a valid quantity to delete');
+                await window.api.post('/api/inventory/adjust', {
+                  product_id: id, qty: -q, reason: 'CORRECTION', note: 'Deleted stock manually'
+                });
+                toast(`Deleted ${q} stock.`);
+              }
+              close();
+              load();
+            } catch (err) { errorToast(err); }
+          });
+        }
+      });
+    });
+
     await load();
   }
 
@@ -92,7 +148,6 @@
         <label>Minimum Stock Level<input name="min_stock" type="number" step="1" value="${p.min_stock ?? 0}"></label>
         <label>Barcode / SKU<input name="barcode" value="${esc(p.barcode || '')}"></label>
         <label class="check"><input type="checkbox" name="serial_tracked" ${p.serial_tracked ? 'checked' : ''}> Track serial numbers</label>
-        ${product ? '' : '<label>Opening Stock<input name="opening_stock" type="number" step="1" value="0"></label>'}
         <label class="full">Description<textarea name="description">${esc(p.description || '')}</textarea></label>
       </div>`;
   }
@@ -109,7 +164,7 @@
 
   async function addProduct(view) {
     view.innerHTML = `
-      <div class="page-head"><div><h1>Add Product</h1>
+      <div class="page-head"><div><h1>Add Product or Stock</h1>
         <p class="muted">Upload supplier invoices to read the products off them, or type one in below.</p></div></div>
       ${tabs('add-product')}
 
@@ -131,120 +186,56 @@
       </div>
 
       <form class="card" id="form">
-        <div class="card-head"><h2>Or add one product manually</h2></div>
+        <div class="card-head"><h2>Or add a product / stock manually</h2></div>
         ${productForm(null)}
+        <div class="form-grid" style="margin-top:14px; border-top:1px solid var(--border); padding-top:14px">
+          <label>Quantity to Add<input name="qty" type="number" min="0" step="1" value="0"></label>
+          <label>Invoice Date<input name="invoice_date" type="date" value="${window.ui.todayIso()}"></label>
+          <label class="full">Supplier Invoice No<input name="supplier_invoice_no"></label>
+        </div>
+        <div id="supplier-pick" style="margin-top:10px"></div>
+        <div id="serial-block" class="hidden" style="margin-top:10px">
+          <label>Serial Numbers (one per line, or scan into the box)
+            <textarea name="serials" placeholder="DL0001&#10;DL0002"></textarea></label>
+          <p class="small muted">Leave blank to add the units without serial numbers and record them later.</p>
+        </div>
         <div class="btn-row" style="margin-top:14px">
-          <button class="btn primary" type="submit">Save Product</button>
+          <button class="btn primary" type="submit">Save Product / Stock</button>
           <a class="btn" href="#/inventory">Cancel</a>
         </div>
       </form>`;
     await fillLists(view);
     setupInvoiceScan(view);
+    
+    let supplierId = null;
+    partySearch(view.querySelector('#supplier-pick'), 'suppliers', (s) => { supplierId = s.id; });
+
+    const trackBox = view.querySelector('[name=serial_tracked]');
+    if (trackBox) {
+      trackBox.addEventListener('change', (e) => {
+        view.querySelector('#serial-block').classList.toggle('hidden', !e.target.checked);
+      });
+    }
 
     view.querySelector('#form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const payload = formValues(e.target);
+      payload.supplier_id = supplierId;
+      payload.serials = String(payload.serials || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+      
       try {
-        const { product } = await window.api.post('/api/products', payload);
-        toast(`${product.name} saved as ${product.product_code}.`, 'success');
-        window.location.hash = `#/inventory/product/${product.id}`;
-      } catch (err) {
-        if (err.status === 409 && err.details && err.details.existingId) {
-          const useExisting = await modal({
-            title: 'Similar product found',
-            body: `<p>${esc(err.message)}</p><p class="muted">Reusing the existing product keeps your inventory and reports clean.</p>`,
-            confirmLabel: 'Open existing product',
-            cancelLabel: 'Create anyway',
-            onConfirm: () => 'existing',
-          });
-          if (useExisting === 'existing') { window.location.hash = `#/inventory/product/${err.details.existingId}`; return; }
-          try {
-            const { product } = await window.api.post('/api/products', { ...payload, force: true });
-            window.location.hash = `#/inventory/product/${product.id}`;
-          } catch (e2) { errorToast(e2); }
-        } else { errorToast(err); }
-      }
-    });
-  }
-
-  // ---------- Add stock (manual) ----------
-  async function addStock(view) {
-    view.innerHTML = `
-      <div class="page-head"><div><h1>Add Stock</h1>
-        <p class="muted">Manual entry. To read a supplier invoice instead, use <a href="#/purchases/add">Purchases → Add Purchase</a>.</p></div></div>
-      ${tabs('add-stock')}
-      <div class="grid cols-2">
-        <form class="card" id="form">
-          <div id="product-pick"></div>
-          <div id="selected" class="alert info hidden"></div>
-          <div class="form-grid">
-            <label>Quantity *<input name="qty" type="number" min="1" step="1" value="1" required></label>
-            <label>Purchase Price<input name="purchase_price" type="number" step="0.01"></label>
-            <label>GST Rate (%)<input name="gst_rate" type="number" step="0.01"></label>
-            <label>Invoice Date<input name="invoice_date" type="date" value="${window.ui.todayIso()}"></label>
-            <label class="full">Supplier Invoice No<input name="supplier_invoice_no"></label>
-          </div>
-          <div id="supplier-pick" style="margin-top:10px"></div>
-          <div id="serial-block" class="hidden" style="margin-top:10px">
-            <label>Serial Numbers (one per line, or scan into the box)
-              <textarea name="serials" placeholder="DL0001&#10;DL0002"></textarea></label>
-            <p class="small muted">Leave blank to add the units without serial numbers and record them later.</p>
-          </div>
-          <div class="btn-row" style="margin-top:14px">
-            <button class="btn primary" type="submit" id="submit" disabled>Add Stock</button>
-          </div>
-        </form>
-        <div class="card">
-          <div class="card-head"><h3>How stock is calculated</h3></div>
-          <p class="small muted">Current stock = opening stock + purchases + customer returns − sales − damaged stock ± adjustments.
-          Every change is written to the stock ledger, so the product history always reconciles with the number you see.</p>
-          <div id="recent">${loading()}</div>
-        </div>
-      </div>`;
-
-    let selected = null;
-    let supplierId = null;
-
-    productSearch(view.querySelector('#product-pick'), (product) => {
-      selected = product;
-      const box = view.querySelector('#selected');
-      box.className = 'alert info';
-      box.innerHTML = `<strong>${esc(product.name)}</strong> · ${esc(product.product_code)} · HSN ${esc(product.hsn_code || '-')}
-        · GST ${product.gst_rate}% · current stock ${qty(product.stock)}`;
-      view.querySelector('[name=purchase_price]').value = product.purchase_price;
-      view.querySelector('[name=gst_rate]').value = product.gst_rate;
-      view.querySelector('#serial-block').classList.toggle('hidden', !product.serial_tracked);
-      view.querySelector('#submit').disabled = false;
-    });
-
-    partySearch(view.querySelector('#supplier-pick'), 'suppliers', (s) => { supplierId = s.id; });
-
-    window.api.get('/api/inventory/movements', { type: 'PURCHASE', limit: 8 }).then(({ movements }) => {
-      view.querySelector('#recent').innerHTML = `<h3 class="small muted" style="margin-top:14px">Recent stock additions</h3>
-        ${table(movements, [
-        { key: 'product_name', label: 'Product' },
-        { key: 'qty', label: 'Qty', num: true, render: (r) => `+${qty(r.qty)}` },
-        { key: 'reference_no', label: 'Reference' },
-        { key: 'created_at', label: 'When', render: (r) => dateTime(r.created_at) },
-      ], { empty: 'No stock has been added yet.' })}`;
-    });
-
-    view.querySelector('#form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      if (!selected) { toast('Search for and select a product first.', 'error'); return; }
-      const values = formValues(e.target);
-      const serials = String(values.serials || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
-      try {
-        const res = await window.api.post('/api/inventory/add-stock', {
-          product_id: selected.id, qty: values.qty, purchase_price: values.purchase_price,
-          gst_rate: values.gst_rate, supplier_id: supplierId,
-          supplier_invoice_no: values.supplier_invoice_no, invoice_date: values.invoice_date, serials,
-        });
-        toast(`Stock added (${res.purchaseNo}). ${selected.name} is now at ${qty(res.balance)}.`, 'success');
-        window.location.hash = `#/inventory/product/${selected.id}`;
+        const res = await window.api.post('/api/inventory/smart-add', payload);
+        if (res.isNew) {
+          toast(`${res.name} created. ${res.purchaseNo ? `Stock added (${res.purchaseNo}). Balance is ${qty(res.balance)}.` : ''}`, 'success');
+        } else {
+          toast(`Existing product '${res.name}' found. ${res.purchaseNo ? `Stock added (${res.purchaseNo}). Balance is ${qty(res.balance)}.` : 'No stock added.'}`, 'success');
+        }
+        window.location.hash = `#/inventory/product/${res.product_id}`;
       } catch (err) { errorToast(err); }
     });
   }
+
+
 
   // ---------- Stock movements ----------
   async function movements(view) {
@@ -297,67 +288,61 @@
       { key: 'category', label: 'Category', render: (r) => esc(r.category || '-') },
       { key: 'stock', label: 'In Stock', num: true, render: (r) => `<span class="tag ${r.stock <= 0 ? 'red' : 'amber'}">${qty(r.stock)}</span>` },
       { key: 'min_stock', label: 'Minimum', num: true },
-      { key: 'action', label: '', render: (r) => `<a class="btn small" href="#/inventory/add-stock">Add stock</a>` },
+      { key: 'action', label: '', render: (r) => `<a class="btn small" href="#/inventory/add-product">Add stock</a>` },
     ], { empty: 'Nothing is running low. ✓' });
   }
 
-  // ---------- Serial numbers ----------
-  async function serials(view) {
+  // ---------- Tracking & Codes (Serials + HSN) ----------
+  async function tracking(view) {
     view.innerHTML = `
-      <div class="page-head"><div><h1>Serial Numbers</h1><p class="muted">Track individual units from purchase to sale.</p></div></div>
-      ${tabs('serials')}
-      <div class="card"><div class="filters">
-        <label class="grow">Search serial<input type="search" id="q" placeholder="Scan or type a serial number"></label>
-        <label>Status<select id="status">
-          <option value="">All</option><option>AVAILABLE</option><option>SOLD</option><option>DAMAGED</option>
-        </select></label>
-      </div></div>
-      <div class="card" id="list">${loading()}</div>`;
+      <div class="page-head"><div><h1>Tracking & Codes</h1><p class="muted">Manage individual serial numbers and HSN tax codes.</p></div>
+        <div class="actions">${window.api.isAdmin() ? '<button class="btn primary" id="add-hsn">+ Add HSN</button>' : ''}</div></div>
+      ${tabs('tracking')}
+      <div class="grid cols-2">
+        <div class="card">
+          <div class="card-head"><h2>Serial Numbers</h2></div>
+          <div class="filters">
+            <label class="grow">Search serial<input type="search" id="q-serial" placeholder="Scan or type a serial number"></label>
+            <label>Status<select id="status-serial">
+              <option value="">All</option><option>AVAILABLE</option><option>SOLD</option><option>DAMAGED</option>
+            </select></label>
+          </div>
+          <div id="list-serial">${loading()}</div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>HSN Codes</h2></div>
+          <div class="filters"><label class="grow">Search<input type="search" id="q-hsn" placeholder="Code or description"></label></div>
+          <div id="list-hsn">${loading()}</div>
+        </div>
+      </div>`;
 
-    const load = async () => {
+    const loadSerials = async () => {
       const { serials: rows } = await window.api.get('/api/inventory/serials', {
-        q: view.querySelector('#q').value.trim(), status: view.querySelector('#status').value, limit: 300,
+        q: view.querySelector('#q-serial').value.trim(), status: view.querySelector('#status-serial').value, limit: 300,
       });
-      view.querySelector('#list').innerHTML = table(rows, [
+      view.querySelector('#list-serial').innerHTML = table(rows, [
         { key: 'serial', label: 'Serial', render: (r) => `<strong>${esc(r.serial)}</strong>` },
         { key: 'product_name', label: 'Product', render: (r) => `<a href="#/inventory/product/${r.product_id}">${esc(r.product_name)}</a>` },
         { key: 'status', label: 'Status', render: (r) => statusTag(r.status) },
         { key: 'invoice_no', label: 'Sold on', render: (r) => (r.invoice_no ? `<a href="#/sales/invoice/${r.invoice_id}">${esc(r.invoice_no)}</a>` : '-') },
-        { key: 'created_at', label: 'Added', render: (r) => date(r.created_at) },
       ], { empty: 'No serial numbers recorded yet.' });
     };
-    let timer;
-    view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 200); });
-    view.querySelector('#status').addEventListener('change', load);
-    await load();
-  }
 
-  // ---------- HSN management ----------
-  async function hsn(view) {
-    view.innerHTML = `
-      <div class="page-head"><div><h1>HSN Codes</h1>
-        <p class="muted">HSN classifies goods for tax. Products carry an HSN; invoices pick it up automatically.</p></div>
-        <div class="actions">${window.api.isAdmin() ? '<button class="btn primary" id="add">+ Add HSN</button>' : ''}</div></div>
-      ${tabs('hsn')}
-      <div class="card"><div class="filters"><label class="grow">Search<input type="search" id="q" placeholder="Code or description"></label></div></div>
-      <div class="card" id="list">${loading()}</div>`;
-
-    const load = async () => {
-      const { hsn: rows } = await window.api.get('/api/hsn', { q: view.querySelector('#q').value.trim() });
-      view.querySelector('#list').innerHTML = table(rows, [
-        { key: 'code', label: 'HSN Code', render: (r) => `<strong>${esc(r.code)}</strong>` },
+    const loadHsn = async () => {
+      const { hsn: rows } = await window.api.get('/api/hsn', { q: view.querySelector('#q-hsn').value.trim() });
+      view.querySelector('#list-hsn').innerHTML = table(rows, [
+        { key: 'code', label: 'Code', render: (r) => `<strong>${esc(r.code)}</strong>` },
         { key: 'description', label: 'Description', render: (r) => esc(r.description || '-') },
-        { key: 'gst_rate', label: 'GST Rate', num: true, render: (r) => `${r.gst_rate}%` },
-        { key: 'products', label: 'Products', num: true },
+        { key: 'gst_rate', label: 'GST', num: true, render: (r) => `${r.gst_rate}%` },
         {
           key: 'actions',
           label: '',
-          render: (r) => (window.api.isAdmin() ? `<button class="btn small" data-edit="${r.id}">Edit</button>` : ''),
+          render: (r) => (window.api.isAdmin() ? `<button class="btn small" data-edit-hsn="${r.id}">Edit</button>` : ''),
         },
       ], { empty: 'No HSN codes yet.' });
 
-      view.querySelectorAll('[data-edit]').forEach((btn) => btn.addEventListener('click', async () => {
-        const row = rows.find((r) => String(r.id) === btn.dataset.edit);
+      view.querySelectorAll('[data-edit-hsn]').forEach((btn) => btn.addEventListener('click', async () => {
+        const row = rows.find((r) => String(r.id) === btn.dataset.editHsn);
         const saved = await modal({
           title: `Edit HSN ${row.code}`,
           confirmLabel: 'Save',
@@ -369,11 +354,11 @@
             </div>`,
           onConfirm: async (root) => window.api.put(`/api/hsn/${row.id}`, formValues(root)),
         });
-        if (saved) { toast('HSN updated.', 'success'); load(); }
+        if (saved) { toast('HSN updated.', 'success'); loadHsn(); }
       }));
     };
 
-    const addBtn = view.querySelector('#add');
+    const addBtn = view.querySelector('#add-hsn');
     if (addBtn) {
       addBtn.addEventListener('click', async () => {
         const created = await modal({
@@ -386,12 +371,18 @@
             </div>`,
           onConfirm: async (root) => window.api.post('/api/hsn', formValues(root)),
         });
-        if (created) { toast('HSN added.', 'success'); load(); }
+        if (created) { toast('HSN added.', 'success'); loadHsn(); }
       });
     }
-    let timer;
-    view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 200); });
-    await load();
+
+    let timerS;
+    view.querySelector('#q-serial').addEventListener('input', () => { clearTimeout(timerS); timerS = setTimeout(loadSerials, 200); });
+    view.querySelector('#status-serial').addEventListener('change', loadSerials);
+    
+    let timerH;
+    view.querySelector('#q-hsn').addEventListener('input', () => { clearTimeout(timerH); timerH = setTimeout(loadHsn, 200); });
+
+    await Promise.all([loadSerials(), loadHsn()]);
   }
 
   // ---------- Create products from scanned invoices ----------
@@ -589,7 +580,7 @@
           <p class="muted">${esc(p.product_code)} · ${esc(p.brand || '-')} ${esc(p.model || '')} · ${esc(p.category || 'Uncategorised')}</p>
         </div>
         <div class="actions">
-          <a class="btn" href="#/inventory/add-stock">Add Stock</a>
+          <a class="btn" href="#/inventory/add-product">Add Stock</a>
           ${admin ? '<button class="btn" id="adjust">Adjust Stock</button>' : ''}
           ${admin ? '<button class="btn" id="edit">Edit</button>' : ''}
         </div>
@@ -690,7 +681,7 @@
         const done = await modal({
           title: 'Add serial numbers',
           confirmLabel: 'Add',
-          body: `<p class="muted small">One serial per line. Adding serials here does not change the stock count - use Add Stock for that.</p>
+          body: `<p class="muted small">One serial per line. Adding serials here does not change the stock count - use Add Product for that.</p>
             <label>Serial numbers<textarea name="serials" rows="6"></textarea></label>`,
           onConfirm: async (root) => window.api.post('/api/inventory/serials', {
             product_id: p.id,
@@ -703,5 +694,5 @@
   }
 
   window.Pages = window.Pages || {};
-  window.Pages.inventory = { products, addProduct, addStock, movements, lowStock, serials, hsn, productDetail };
+  window.Pages.inventory = { products, addProduct, movements, lowStock, tracking, productDetail };
 })();

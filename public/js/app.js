@@ -4,41 +4,39 @@
   const { esc, money, qty, dateTime, toast, errorToast } = window.ui;
 
   const NAV = [
-    { group: '', items: [{ href: '#/', label: 'Dashboard', icon: '📊' }] },
+    { group: '', items: [{ href: '#/', label: 'Dashboard' }] },
     {
       group: 'Inventory',
       items: [
-        { href: '#/inventory', label: 'All Products', icon: '📦' },
-        { href: '#/inventory/add-product', label: 'Add Product', icon: '➕', admin: true },
-        { href: '#/inventory/add-stock', label: 'Add Stock', icon: '📥' },
-        { href: '#/inventory/movements', label: 'Stock Movements', icon: '🧾' },
-        { href: '#/inventory/low-stock', label: 'Low Stock', icon: '⚠️', badge: 'lowStock' },
-        { href: '#/inventory/serials', label: 'Serial Numbers', icon: '🔢' },
-        { href: '#/inventory/hsn', label: 'HSN Codes', icon: '🏷️' },
+        { href: '#/inventory', label: 'All Products' },
+        { href: '#/inventory/add-product', label: 'Add Product / Stock', admin: true },
+        { href: '#/inventory/movements', label: 'Stock Movements' },
+        { href: '#/inventory/low-stock', label: 'Low Stock', badge: 'lowStock' },
+        { href: '#/inventory/tracking', label: 'Tracking & Codes' },
       ],
     },
     {
       group: 'Purchases',
       items: [
-        { href: '#/purchases', label: 'Purchase History', icon: '🚚' },
-        { href: '#/purchases/add', label: 'Add Purchase', icon: '📤' },
+        { href: '#/purchases', label: 'Purchase History' },
+        { href: '#/purchases/add', label: 'Add Purchase' },
       ],
     },
     {
       group: 'Sales',
       items: [
-        { href: '#/sales/create', label: 'Create Invoice', icon: '🧮' },
-        { href: '#/sales', label: 'Invoice History', icon: '📄' },
-        { href: '#/sales/returns', label: 'Returns', icon: '↩️' },
+        { href: '#/sales/create', label: 'Create Invoice' },
+        { href: '#/sales', label: 'Invoice History' },
+        { href: '#/sales/returns', label: 'Returns' },
       ],
     },
     {
       group: 'Business',
       items: [
-        { href: '#/customers', label: 'Customers', icon: '🙋' },
-        { href: '#/suppliers', label: 'Suppliers', icon: '🏭' },
-        { href: '#/reports', label: 'Analytics & Reports', icon: '📈' },
-        { href: '#/settings', label: 'Settings', icon: '⚙️', admin: true },
+        { href: '#/customers', label: 'Customers' },
+        { href: '#/suppliers', label: 'Suppliers' },
+        { href: '#/reports', label: 'Analytics & Reports' },
+        { href: '#/settings', label: 'Settings', admin: true },
       ],
     },
   ];
@@ -47,11 +45,9 @@
     [/^\/?$/, (view) => window.Pages.dashboard.render(view)],
     [/^\/inventory\/?$/, (view) => window.Pages.inventory.products(view)],
     [/^\/inventory\/add-product$/, (view) => window.Pages.inventory.addProduct(view)],
-    [/^\/inventory\/add-stock$/, (view) => window.Pages.inventory.addStock(view)],
     [/^\/inventory\/movements$/, (view) => window.Pages.inventory.movements(view)],
     [/^\/inventory\/low-stock$/, (view) => window.Pages.inventory.lowStock(view)],
-    [/^\/inventory\/serials$/, (view) => window.Pages.inventory.serials(view)],
-    [/^\/inventory\/hsn$/, (view) => window.Pages.inventory.hsn(view)],
+    [/^\/inventory\/tracking$/, (view) => window.Pages.inventory.tracking(view)],
     [/^\/inventory\/product\/(\d+)$/, (view, id) => window.Pages.inventory.productDetail(view, id)],
     [/^\/purchases\/?$/, (view) => window.Pages.purchases.history(view)],
     [/^\/purchases\/add$/, (view) => window.Pages.purchases.add(view)],
@@ -77,7 +73,7 @@
       if (!items.length) return '';
       return `${section.group ? `<div class="group">${esc(section.group)}</div>` : ''}
         ${items.map((i) => `<a href="${i.href}" class="${current === i.href ? 'active' : ''}">
-            <span>${i.icon}</span><span>${esc(i.label)}</span>
+            <span>${esc(i.label)}</span>
             ${i.badge && counters[i.badge] ? `<span class="pill">${counters[i.badge]}</span>` : ''}
           </a>`).join('')}`;
     }).join('');

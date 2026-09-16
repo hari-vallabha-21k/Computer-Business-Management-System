@@ -162,7 +162,7 @@ test('an Excel invoice is read like any other', async () => {
   const text = workbookToText(xlsx);
   assert.match(text, /Excel Scan Keyboard/);
 
-  const result = extractPurchaseInvoice(xlsx, 'wholesale.xlsx');
+  const result = await extractPurchaseInvoice(xlsx, 'wholesale.xlsx');
   assert.equal(result.ok, true);
   assert.equal(result.header.invoiceNo, 'TW/0926/0142');
   assert.equal(result.header.invoiceDate, '2026-09-11');

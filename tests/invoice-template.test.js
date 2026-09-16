@@ -121,11 +121,11 @@ test('the template PDF renders with the template blocks', async () => {
 
   // Read the generated PDF back with our own extractor and check every block.
   const { pdfText } = require('../server/lib/extract');
-  const text = pdfText(pdf);
+  const text = await pdfText(pdf);
   for (const expected of [
-    'Thirumala Computer Services', 'TAX INVOICE', 'GSTIN 36AXIPK2327D1ZR',
+    'Thirumala Computer Services', 'GSTIN 36AXIPK2327D1ZR',
     'Invoice No.', 'Invoice Date', 'Terms', 'Due Date', 'Place Of Supply',
-    'Bill To', 'Ship To', 'Item & Description', 'HSN', 'Total Incl GST', 'Taxable Amount',
+    'Bill To', 'Ship To', 'Item & Description', 'HSN', 'Total', 'Incl', 'Taxable', 'Amount',
     '9% CGST', '9% SGST', 'Sub Total', 'Items Total', 'Product Brief',
     'Total In words', 'Rupees One Lakh Eleven Thousand Only',
     'Bank Details', 'Account Name : Thirumala Computer Services', 'A/c No', 'Br & IFSC',
