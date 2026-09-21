@@ -9,7 +9,7 @@
  */
 const zlib = require('node:zlib');
 const path = require('node:path');
-const pdfParse = require('pdf-parse');
+const { PDFParse } = require('pdf-parse');
 const { db } = require('../db');
 const { round2, similarity, normalise } = require('./util');
 const { workbookToText } = require('./xlsx');
@@ -31,10 +31,9 @@ function fromHex(hex) {
 /** Pull readable text out of a PDF using pdf-parse. */
 async function pdfText(buffer) {
   try {
-    const fs = require('fs');
-    fs.writeFileSync('last_upload.pdf', buffer);
-    const data = await pdfParse(buffer);
-    console.log('pdfParse success, extracted text length:', (data.text || '').length);
+    const standardFontDataUrl = path.join(require.resolve('pdfjs-dist'), '../../standard_fonts/');
+    const parser = new PDFParse(new Uint8Array(buffer), { standardFontDataUrl });
+    const data = await parser.getText();
     return data.text || '';
   } catch (err) {
     console.error('pdfParse error:', err);
@@ -140,7 +139,7 @@ function findItems(text) {
     }
   }
 
-  const rowRe = new RegExp(`^(.+?)\\s+(\\d{4,8})?\\s*(\\d+(?:\\.\\d+)?)\\s+${MONEY}(?:\\s+${MONEY})?$`);
+  const rowRe = new RegExp(`^(.+?)\\s+(\\d{4,8})?\\s*(\\d+(?:\\.\\d+)?)\\s+${MONEY}(?:\\s+\\d{1,2}(?:\\.\\d+)?%)?(?:\\s+${MONEY})?$`);
   for (const line of lines) {
     if (/^(total|sub\s*total|grand|gst|cgst|sgst|igst|amount in words|discount|round)/i.test(line)) continue;
     const m = line.match(rowRe);

@@ -26,6 +26,49 @@ function partyRouter(table) {
     res.json({ [table]: enriched });
   }));
 
+  router.get('/export/excel', wrap(async (req, res) => {
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet(isCustomer ? 'Customers' : 'Suppliers');
+
+    const columns = [
+      { header: 'Name', key: 'name', width: 25 },
+      { header: 'Phone', key: 'phone', width: 15 },
+      { header: 'Email', key: 'email', width: 25 },
+      { header: 'Address', key: 'address', width: 30 },
+      { header: 'GSTIN', key: 'gstin', width: 20 },
+    ];
+    
+    if (isCustomer) {
+      columns.push({ header: 'Shipping Address', key: 'shipping_address', width: 30 });
+      columns.push({ header: 'Invoices', key: 'transactions', width: 12 });
+    } else {
+      columns.push({ header: 'Purchases', key: 'transactions', width: 12 });
+    }
+    columns.push({ header: 'Total Value', key: 'total_value', width: 15 });
+    
+    sheet.columns = columns;
+
+    const rows = db.prepare(`SELECT * FROM ${table} ORDER BY name`).all();
+    const enriched = rows.map((r) => {
+      const stats = isCustomer
+        ? db.prepare(`SELECT COUNT(*) AS invoices, COALESCE(SUM(total), 0) AS value
+             FROM invoices WHERE customer_id = ? AND status = 'ISSUED'`).get(r.id)
+        : db.prepare(`SELECT COUNT(*) AS invoices, COALESCE(SUM(total), 0) AS value
+             FROM purchases WHERE supplier_id = ?`).get(r.id);
+      return { ...r, transactions: stats.invoices, total_value: stats.value };
+    });
+
+    sheet.addRows(enriched);
+    sheet.getRow(1).font = { bold: true };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${table}.xlsx"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.end(buffer);
+  }));
+
   router.get('/:id', wrap((req, res) => {
     const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(Number(req.params.id));
     if (!row) throw new AppError('Record not found.', 404);

@@ -13,7 +13,10 @@
           <p class="muted">${kind === 'customers'
         ? 'Searchable on every invoice, with full purchase history.'
         : 'Linked to purchases; scanned invoices try to identify the supplier automatically.'}</p></div>
-          <div class="actions"><button class="btn primary" id="add">+ Add ${label}</button></div></div>
+          <div class="actions">
+            <button class="btn ghost" id="download-excel">Download Excel</button>
+            <button class="btn primary" id="add">+ Add ${label}</button>
+          </div></div>
         <div class="card"><div class="filters">
           <label class="grow">Search<input type="search" id="q" placeholder="Name, phone, email or GSTIN"></label>
         </div></div>
@@ -88,6 +91,19 @@
       });
       let timer;
       view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 200); });
+      
+      const dlBtn = view.querySelector('#download-excel');
+      dlBtn.addEventListener('click', async () => {
+        dlBtn.disabled = true;
+        try {
+          await window.api.download(`/api/${kind}/export/excel`, {}, `${kind}.xlsx`);
+        } catch (err) {
+          errorToast(err);
+        } finally {
+          dlBtn.disabled = false;
+        }
+      });
+      
       await load();
     };
   }
