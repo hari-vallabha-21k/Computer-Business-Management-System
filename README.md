@@ -148,9 +148,8 @@ Invoices can be uploaded **one at a time or many at once**, from two places:
 
 What it can read, entirely locally with no external service:
 
-- PDFs **with a text layer** — content streams are inflated and both literal and hex show-text
-  operands are decoded, so ordinary single-byte-encoded PDFs (including the ones this system
-  generates) come back as text
+- PDFs **with a text layer** — read with `pdf-parse`, so the supplier bills that arrive as
+  ordinary PDFs (including the ones this system generates) come back as text
 - **Excel workbooks** (`.xlsx`) — the ZIP parts are inflated and the sheet XML read directly,
   so an invoice kept as a spreadsheet is parsed like any other table
 - CSV / TSV / plain-text invoices, either delimited or `… <hsn> <qty> <rate> <amount>` rows
@@ -255,7 +254,7 @@ All endpoints live under `/api` and need a bearer token (or the session cookie) 
 | Purchases | `GET/POST /purchases`, `GET /purchases/:id`, `POST /purchases/:id/checked`, `POST /purchases/extract` |
 | Sales | `GET/POST /invoices`, `GET/PUT/DELETE /invoices/:id`, `POST /invoices/:id/issue`, `POST /invoices/:id/cancel`, `POST /invoices/:id/serials`, `GET /invoices/:id/pdf`, `GET /invoices/:id/qr` |
 | Returns | `GET /returns`, `GET /returns/invoice/:invoiceNo`, `POST /returns` |
-| Parties | `GET/POST /customers`, `GET/POST /suppliers`, `GET/PUT/DELETE /:id` on both |
+| Parties | `GET/POST /customers`, `GET/POST /suppliers`, `GET/PUT/DELETE /:id` on both, `GET /export/excel` on both |
 | Analytics | `GET /analytics/dashboard`, `/sales-trend`, `/by-product`, `/by-category`, `/by-hsn`, `/inventory` |
 | Reports | `GET /reports`, `GET /reports/:name` (`?format=csv` or `?format=xlsx` to download, `?category=` / `?productId=` to narrow) |
 | Admin | `GET/PUT /settings`, `GET /settings/backup`, `GET/POST/PUT /users`, `GET /notifications`, `POST /notifications/read` |
