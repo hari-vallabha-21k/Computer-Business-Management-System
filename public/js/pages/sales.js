@@ -442,8 +442,11 @@
     const { invoice: inv, items, business } = await window.api.get(`/api/invoices/${id}`);
     const qr = await window.api.get(`/api/invoices/${id}/qr`).catch(() => ({ dataUrl: null }));
     const interState = inv.igst > 0;
-    const gstRate = items.length ? Number(items[0].gst_rate) : 18;
-    const halfRate = Math.round((gstRate / 2) * 100) / 100;
+    // Header percentages only when every line shares one rate, as on the PDF.
+    const rates = [...new Set(items.map((it) => Number(it.gst_rate)))];
+    const gstRate = rates.length === 1 ? rates[0] : null;
+    const pct = (v) => (v === null ? '' : `${v}% `);
+    const halfRate = gstRate === null ? null : Math.round((gstRate / 2) * 100) / 100;
     const unitsTotal = items.reduce((s, it) => s + Number(it.qty), 0);
     const bankLines = [
       business.bank_account_name ? `Account Name : ${business.bank_account_name}` : '',
@@ -521,9 +524,9 @@
                 <th class="num">Qty</th><th class="num">Rate</th><th class="num">Total Incl GST</th>
                 <th class="num">Taxable Amount</th>
                 ${interState
-    ? `<th class="num">${gstRate}% IGST<div class="small">Amount</div></th>`
-    : `<th class="num">${halfRate}% CGST<div class="small">Amount</div></th>
-                   <th class="num">${halfRate}% SGST<div class="small">Amount</div></th>`}
+    ? `<th class="num">${pct(gstRate)}IGST<div class="small">Amount</div></th>`
+    : `<th class="num">${pct(halfRate)}CGST<div class="small">Amount</div></th>
+                   <th class="num">${pct(halfRate)}SGST<div class="small">Amount</div></th>`}
               </tr>
             </thead>
             <tbody>

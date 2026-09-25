@@ -28,16 +28,36 @@ function fromHex(hex) {
   return out;
 }
 
+/**
+ * pdfjs needs its standard font files to lay out text in PDFs that do not embed
+ * their fonts. pdfjs-dist is a declared dependency (pinned to the version
+ * pdf-parse uses), so this resolves under any install layout; if it somehow
+ * cannot, text is still read, just without those fonts.
+ */
+let fontDir;
+function standardFontDataUrl() {
+  if (fontDir === undefined) {
+    try {
+      fontDir = path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'standard_fonts') + path.sep;
+    } catch {
+      fontDir = null;
+    }
+  }
+  return fontDir || undefined;
+}
+
 /** Pull readable text out of a PDF using pdf-parse. */
 async function pdfText(buffer) {
+  const parser = new PDFParse({ data: new Uint8Array(buffer), standardFontDataUrl: standardFontDataUrl() });
   try {
-    const standardFontDataUrl = path.join(require.resolve('pdfjs-dist'), '../../standard_fonts/');
-    const parser = new PDFParse(new Uint8Array(buffer), { standardFontDataUrl });
     const data = await parser.getText();
     return data.text || '';
   } catch (err) {
-    console.error('pdfParse error:', err);
+    console.error('Could not read PDF text:', err.message);
     return '';
+  } finally {
+    // pdf-parse keeps the pdfjs document open until told otherwise.
+    await parser.destroy().catch(() => {});
   }
 }
 

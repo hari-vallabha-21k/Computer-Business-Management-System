@@ -115,10 +115,13 @@
           { label: 'Total Business', num: true, render: (r) => rupees(r.total_value) },
           { label: 'Last', render: (r) => `<span class="muted nowrap">${r.last_transaction ? date(r.last_transaction) : '—'}</span>` },
         ], { rowAttrs: (r) => `data-href="#/${kind}/${r.id}"` })
-          : `<div class="empty">
-              <h3>No one called “${esc(view.querySelector('#q').value.trim())}”</h3>
-              <p>Try the phone number instead.</p>
+          : (() => {
+            const q = view.querySelector('#q').value.trim();
+            return `<div class="empty">
+              <h3>${q ? `No one called “${esc(q)}”` : `No ${c.title.toLowerCase()} yet`}</h3>
+              <p>${q ? 'Try the phone number instead.' : `Add your first ${c.kind.toLowerCase()} to get started.`}</p>
               <button class="btn primary" id="add-empty">${c.add}</button></div>`;
+          })();
         wireLinks(host);
         const addEmpty = host.querySelector('#add-empty');
         if (addEmpty) addEmpty.addEventListener('click', add);

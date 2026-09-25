@@ -65,7 +65,7 @@ To run the project on your machine without issues or having the terminal unexpec
 
 ### Running Tests
 ```bash
-npm test          # 53 tests: business rules, scanning, multi-invoice, invoice template, screens
+npm test          # business rules, scanning, multi-invoice, invoice template, screens
 ```
 
 ## How it is built

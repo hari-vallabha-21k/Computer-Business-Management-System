@@ -62,8 +62,10 @@
     const admin = window.api.isAdmin();
     const monthRange = periodRange('month');
 
-    const [dash, low, top, invoices] = await Promise.all([
+    const [dash, month, low, top, invoices] = await Promise.all([
       window.api.get('/api/analytics/dashboard', { from, to, compare: true }),
+      // The Monthly Sales tile is always the month so far, whatever period is picked.
+      window.api.get('/api/analytics/dashboard', monthRange),
       window.api.get('/api/inventory/low-stock'),
       window.api.get('/api/analytics/by-product', { ...monthRange, limit: 4 }),
       window.api.get('/api/invoices', { limit: 5 }),
@@ -83,7 +85,7 @@
       },
       admin
         ? {
-          label: 'Monthly Sales', value: moneyShort(k.totalSales),
+          label: 'Monthly Sales', value: moneyShort(month.kpis.totalSales),
           note: new Date().toLocaleDateString('en-IN', { month: 'long' }) + ' so far', href: '#/analytics',
         }
         : { label: 'Items Sold', value: qty(k.itemsSold), note: 'This period', href: '#/sales' },

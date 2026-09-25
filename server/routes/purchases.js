@@ -7,6 +7,7 @@ const inv = require('../lib/inventory');
 const { extractPurchaseInvoice } = require('../lib/extract');
 const { resolveHsn, resolveCategory, generateCode } = require('./products');
 const { requirePermission } = require('../lib/permissions');
+const { requireRole } = require('../lib/auth');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -185,7 +186,7 @@ router.post('/', requirePermission('stock'), wrap((req, res) => {
 }));
 
 /** "Mark as checked" on a scanned purchase whose lines were flagged. */
-router.post('/:id/checked', wrap((req, res) => {
+router.post('/:id/checked', requireRole('ADMIN'), wrap((req, res) => {
   const id = Number(req.params.id);
   const purchase = db.prepare('SELECT * FROM purchases WHERE id = ?').get(id);
   if (!purchase) throw new AppError('Purchase not found.', 404);

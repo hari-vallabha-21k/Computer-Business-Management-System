@@ -55,23 +55,34 @@ async function qrDataUrl(invoice, business, baseUrl) {
   return { ...payload, dataUrl };
 }
 
-/** Item grid columns; widths sum to the printable width. */
-function columns(left, width, interState) {
+/**
+ * Item grid columns; widths sum to the printable width. `rate` is the GST rate
+ * shared by every line, or null when lines carry different rates, in which case
+ * the tax headers name the tax without a percentage.
+ */
+function columns(left, width, interState, rate = 18) {
+  const pct = (value) => (value === null ? '' : `${Number(value)}% `);
+  const half = rate === null ? null : round2(rate / 2);
   const spec = interState
     ? [['#', 22, 'center'], ['Item & Description', 180, 'left'], ['HSN', 50, 'center'], ['Qty', 30, 'center'],
-      ['Rate', 50, 'center'], ['Total Incl\nGST', 60, 'center'], ['Taxable\nAmount', 60, 'center'], ['18% IGST\nAmount', 75, 'center']]
+      ['Rate', 50, 'center'], ['Total Incl\nGST', 60, 'center'], ['Taxable\nAmount', 60, 'center'],
+      [`${pct(rate)}IGST\nAmount`, 75, 'center']]
     : [['#', 22, 'center'], ['Item & Description', 170, 'left'], ['HSN', 50, 'center'], ['Qty', 25, 'center'],
       ['Rate', 45, 'center'], ['Total Incl\nGST', 55, 'center'], ['Taxable\nAmount', 55, 'center'],
-      ['9% CGST\nAmount', 50, 'center'], ['9% SGST\nAmount', 55, 'center']];
-  
-  const fixed = spec.reduce((s, c) => s + c[1], 0);
+      [`${pct(half)}CGST\nAmount`, 50, 'center'], [`${pct(half)}SGST\nAmount`, 55, 'center']];
+
   let x = left;
   return spec.map(([label, w, align]) => {
-    const colWidth = w || width - fixed;
-    const col = { label, x, w: colWidth, align };
-    x += colWidth;
+    const col = { label, x, w, align };
+    x += w;
     return col;
   });
+}
+
+/** The single GST rate on an invoice, or null when its lines differ. */
+function sharedRate(items) {
+  const rates = [...new Set(items.map((i) => Number(i.gst_rate)))];
+  return rates.length === 1 ? rates[0] : null;
 }
 
 /** Render a tax invoice as a PDF and stream it to res. */
@@ -85,6 +96,16 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   const right = 565;
   const width = right - left;
   const interState = invoice.igst > 0;
+  const rate = items.length ? sharedRate(items) : 18;
+
+  // Blocks are drawn at explicit positions, so page breaks are ours to make:
+  // start a new page whenever the next block would not fit above the footer.
+  const PAGE_BOTTOM = 800;
+  const ensure = (top, needed) => {
+    if (top + needed <= PAGE_BOTTOM) return top;
+    doc.addPage();
+    return left;
+  };
   
   const LINE = '#000000';
   const INK = '#000000';
@@ -179,43 +200,56 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   y += partyH;
 
   // ---- Item grid ----
-  const cols = columns(left, width, interState);
+  const cols = columns(left, width, interState, rate);
   const headH = 24;
   const minRows = 5;
   const numRows = Math.max(items.length, minRows);
-  const itemsHeight = numRows * rowH;
-  
-  box(left, y, width, headH + itemsHeight);
-  
-  doc.font('Times-Bold').fontSize(9);
-  cols.forEach((c, i) => {
-    if (i) vLine(c.x, y, headH + itemsHeight);
-    text(c.label, c.x + 2, y + 4, { width: c.w - 4, align: c.align });
-  });
-  hLine(y + headH);
-  y += headH;
+
+  const drawHeader = (top) => {
+    box(left, top, width, headH);
+    doc.font('Times-Bold').fontSize(9);
+    cols.forEach((c, i) => {
+      if (i) vLine(c.x, top, headH);
+      text(c.label, c.x + 2, top + 4, { width: c.w - 4, align: c.align });
+    });
+    return top + headH;
+  };
 
   const money0 = (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  let currentY = y;
-  
+  let currentY = drawHeader(ensure(y, headH + rowH));
+
   for (let i = 0; i < numRows; i++) {
     const item = items[i];
+    doc.font('Times-Roman').fontSize(9);
+    let cells = [];
     if (item) {
-      doc.font('Times-Roman').fontSize(9);
       const gstHalf = interState ? [money0(item.gst_amount)]
         : [money0(item.gst_amount / 2), money0(item.gst_amount / 2)];
-        
-      const cells = [String(i + 1), item.description, item.hsn_code || '-', String(item.qty),
+      cells = [String(i + 1), item.description, item.hsn_code || '-', String(item.qty),
         money0(item.unit_price), money0(item.total), money0(item.taxable_value), ...gstHalf];
-        
-      cells.forEach((cell, ci) => {
-        text(cell, cols[ci].x + 2, currentY + 3, { width: cols[ci].w - 4, align: cols[ci].align });
-      });
     }
-    currentY += rowH;
-    if (i < numRows - 1) hLine(currentY);
+    // A long description wraps, and its row grows to hold it.
+    const tallest = cells.length
+      ? Math.max(...cells.map((cell, ci) => doc.heightOfString(String(cell), { width: cols[ci].w - 4 })))
+      : 0;
+    const h = Math.max(rowH, Math.ceil(tallest) + 5);
+
+    if (currentY + h > PAGE_BOTTOM) {
+      doc.addPage();
+      currentY = drawHeader(left);
+      doc.font('Times-Roman').fontSize(9);
+    }
+
+    box(left, currentY, width, h);
+    cols.forEach((c, ci) => {
+      if (ci) vLine(c.x, currentY, h);
+      if (cells.length) text(cells[ci], c.x + 2, currentY + 3, { width: c.w - 4, align: c.align });
+    });
+    currentY += h;
   }
-  
+
+  currentY = ensure(currentY, rowH * 2);
+
   // Sub Total Row
   doc.font('Times-Bold').fontSize(9);
   box(left, currentY, width, rowH);
@@ -246,6 +280,7 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
 
   // ---- Product brief ----
   const briefH = 36;
+  y = ensure(y, briefH);
   box(left, y, width, briefH);
   if (invoice.product_brief || items.some(i => i.serials && i.serials.length) || items.length) {
     doc.font('Times-Bold').fontSize(9);
@@ -264,6 +299,7 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
 
   // ---- Amount in words ----
   const wordsH = 26;
+  y = ensure(y, wordsH);
   box(left, y, width, wordsH);
   doc.font('Times-Roman').fontSize(9);
   text('Total In words', left + 2, y + 2);
@@ -273,6 +309,7 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
 
   // ---- Bank details, QR and signatory ----
   const bankH = 120;
+  y = ensure(y, bankH);
   box(left, y, width, bankH);
   vLine(left + width * 0.6, y, bankH);
   
@@ -281,7 +318,7 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   
   const bankLines = [
     business.bank_account_name ? `Account Name : ${business.bank_account_name}` : '',
-    business.bank_account_no ? `A/cNo              : ${business.bank_account_no}` : '',
+    business.bank_account_no ? `A/c No             : ${business.bank_account_no}` : '',
     business.bank_branch_ifsc ? `Br & IFSC        : ${business.bank_branch_ifsc}` : '',
     !business.bank_account_name && !business.bank_account_no && business.bank_details ? business.bank_details : '',
   ].filter(Boolean);
@@ -302,6 +339,7 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
 
   // ---- Terms and declaration ----
   const footerH = 65;
+  y = ensure(y, footerH);
   box(left, y, width, footerH);
   hLine(y + 40); 
   
@@ -327,6 +365,7 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   const pages = doc.bufferedPageRange();
   for (let i = 0; i < pages.count; i += 1) {
     doc.switchToPage(pages.start + i);
+    doc.page.margins.bottom = 0; // writing the footer must not trigger another page
     doc.font('Times-Roman').fontSize(7).fillColor('#999999');
     text(`This is a computer generated invoice.${pages.count > 1 ? `   Page ${i + 1} of ${pages.count}` : ''}`,
       left, 810, { width, align: 'center' });
@@ -335,4 +374,4 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   doc.end();
 }
 
-module.exports = { renderInvoicePdf, qrPayload, qrDataUrl };
+module.exports = { renderInvoicePdf, qrPayload, qrDataUrl, columns, sharedRate };

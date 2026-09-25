@@ -28,7 +28,8 @@
         { href: '#/inventory/add-stock', label: 'Add Stock' },
         { href: '#/inventory/movements', label: 'Stock Movements', match: /^#\/inventory\/(movements|adjust)/ },
         { href: '#/inventory/low-stock', label: 'Low Stock', badge: 'lowStock' },
-        { href: '#/inventory/hsn', label: 'HSN Code', admin: true },
+        { href: '#/inventory/serials', label: 'Serial Numbers', permission: 'serials' },
+        { href: '#/inventory/hsn', label: 'HSN Code', admin: true, match: /^#\/inventory\/hsn/ },
       ],
     },
     {
@@ -62,6 +63,7 @@
     [/^\/inventory\/movements$/, (view) => window.Pages.inventory.movements(view)],
     [/^\/inventory\/adjust$/, (view) => window.Pages.inventory.adjust(view)],
     [/^\/inventory\/low-stock$/, (view) => window.Pages.inventory.lowStock(view)],
+    [/^\/inventory\/serials$/, (view) => window.Pages.inventory.serials(view)],
     [/^\/inventory\/hsn$/, (view) => window.Pages.inventory.hsn(view)],
     [/^\/inventory\/hsn\/([^/]+)$/, (view, code) => window.Pages.inventory.hsnDetail(view, decodeURIComponent(code))],
     [/^\/inventory\/product\/(\d+)$/, (view, id) => window.Pages.inventory.productDetail(view, id)],
@@ -101,7 +103,7 @@
   }
 
   function renderNav() {
-    const current = window.location.hash || '#/';
+    const current = (window.location.hash || '#/').split('?')[0];
     const allowed = (item) => (!item.admin || window.api.isAdmin())
       && (!item.permission || window.api.can(item.permission));
 
@@ -118,7 +120,8 @@
 
   async function route() {
     const view = document.getElementById('view');
-    const path = (window.location.hash || '#/').slice(1) || '/';
+    // "?product=5" carries context for the page; it is not part of the route.
+    const path = (window.location.hash || '#/').slice(1).split('?')[0] || '/';
     renderNav();
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('scrim').hidden = true;

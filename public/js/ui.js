@@ -185,6 +185,8 @@
 
   /** The page title block. One primary action, everything else a link. */
   function pageHead({ eyebrow, title, sub, actions, back }) {
+    // Accept a bare href as well as { href, label }.
+    if (typeof back === 'string') back = { href: back, label: 'Back' };
     return `
       ${back ? `<a class="back-link" href="${back.href}">← ${esc(back.label)}</a>` : ''}
       <div class="page-head">
@@ -243,8 +245,13 @@
         if (handler) handler(button.closest('[data-id]'));
       }));
     });
-    document.addEventListener('click', () => root.querySelectorAll('.menu').forEach((m) => { m.hidden = true; }));
   }
+
+  // One document-level listener closes whichever menu is open; wiring a page
+  // no longer adds another, so nothing piles up as you move between pages.
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.menu-wrap .menu').forEach((m) => { m.hidden = true; });
+  });
 
   /** Clickable rows: wire every element carrying data-href. */
   function wireLinks(root) {

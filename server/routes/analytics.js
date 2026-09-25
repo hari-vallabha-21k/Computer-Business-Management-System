@@ -108,8 +108,12 @@ router.get('/dashboard', wrap((req, res) => {
   };
   // Purchase prices and margins are the owner's business unless shared.
   if (costsHidden) {
-    for (const key of ['grossProfit', 'cost', 'stockValue', 'totalPurchases', 'purchaseCount', 'netRevenue']) delete kpis[key];
-    if (comparison) delete comparison.change.grossProfit;
+    const hidden = ['grossProfit', 'cost', 'stockValue', 'totalPurchases', 'purchaseCount', 'netRevenue'];
+    for (const key of hidden) delete kpis[key];
+    if (comparison) {
+      delete comparison.change.grossProfit;
+      for (const key of ['cost', 'grossProfit', 'revenue']) delete comparison.previous[key];
+    }
   }
   res.json({ range: { from, to }, kpis, comparison });
 }));
@@ -156,10 +160,12 @@ router.get('/by-product', wrap((req, res) => {
            COALESCE(SUM((it.qty - it.returned_qty) * it.cost_price), 0) AS cost
     ${ITEM_JOIN} WHERE ${clause}
     GROUP BY p.id HAVING units > 0 ORDER BY units DESC LIMIT ?`).all(...params, num(req.query.limit, 10));
+  const showCosts = can(req.user, 'costs');
   res.json({
-    products: rows.map((r) => ({
-      ...r, units: round2(r.units), sales: round2(r.sales), cost: round2(r.cost),
-      grossProfit: round2(r.taxable - r.cost),
+    products: rows.map(({ cost, taxable, ...r }) => ({
+      ...r, units: round2(r.units), sales: round2(r.sales),
+      // Cost and margin are the owner's business unless shared with staff.
+      ...(showCosts ? { cost: round2(cost), grossProfit: round2(taxable - cost) } : {}),
     })),
   });
 }));
