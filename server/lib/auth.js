@@ -31,8 +31,10 @@ function verifyToken(token) {
   }
 }
 
+const hashPassword = (password) => bcrypt.hashSync(String(password), 10);
+
 function createUser({ name, email, password, role = 'STAFF' }) {
-  const hash = bcrypt.hashSync(password, 10);
+  const hash = hashPassword(password);
   const info = db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)')
     .run(name, String(email).toLowerCase(), hash, role);
   return db.prepare('SELECT id, name, email, role FROM users WHERE id = ?').get(info.lastInsertRowid);
@@ -73,4 +75,4 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { signToken, verifyToken, createUser, login, authenticate, requireAuth, requireRole };
+module.exports = { hashPassword, signToken, verifyToken, createUser, login, authenticate, requireAuth, requireRole };

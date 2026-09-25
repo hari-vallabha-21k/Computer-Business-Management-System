@@ -23,6 +23,7 @@ const api = express.Router();
 api.use(requireAuth);
 api.use('/products', require('./routes/products').router);
 api.use('/hsn', require('./routes/hsn'));
+api.use('/categories', require('./routes/categories'));
 api.use('/inventory', require('./routes/inventory'));
 api.use('/purchases', require('./routes/purchases'));
 api.use('/invoices', require('./routes/invoices').router);

@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const { db, tx } = require('../db');
-const { AppError, wrap, num, str, required, similarity } = require('../lib/util');
+const { AppError, wrap, num, str, required, similarity, round2 } = require('../lib/util');
 const inventory = require('../lib/inventory');
 const { requireRole } = require('../lib/auth');
 
@@ -12,6 +12,17 @@ const SELECT = `
   FROM products p
   LEFT JOIN categories c ON c.id = p.category_id
   LEFT JOIN hsn_codes h ON h.id = p.hsn_id`;
+
+/**
+ * Tax defaults for a category, so a new product only needs its category
+ * chosen: the HSN code and GST rate come with it.
+ */
+function categoryDefaults(categoryId) {
+  if (!categoryId) return null;
+  const row = db.prepare(`SELECT c.gst_rate, c.hsn_id, h.code AS hsn_code
+    FROM categories c LEFT JOIN hsn_codes h ON h.id = c.hsn_id WHERE c.id = ?`).get(categoryId);
+  return row && row.hsn_id ? row : null;
+}
 
 function generateCode(categoryName) {
   const base = (categoryName || 'PRD').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'X');
@@ -87,21 +98,64 @@ router.post('/match', wrap((req, res) => {
   res.json({ matches: scored });
 }));
 
+/**
+ * Everything the product page shows: the record, its ledger, and the three
+ * histories behind its tabs (sales, purchases, serial numbers).
+ */
 router.get('/:id', wrap((req, res) => {
   const product = db.prepare(`${SELECT} WHERE p.id = ?`).get(Number(req.params.id));
   if (!product) throw new AppError('Product not found.', 404);
   const movements = db.prepare(
     'SELECT * FROM inventory_transactions WHERE product_id = ? ORDER BY id DESC LIMIT 100',
   ).all(product.id);
-  const serials = db.prepare('SELECT * FROM serial_numbers WHERE product_id = ? ORDER BY status, serial').all(product.id);
-  res.json({ product, movements, serials, ledgerStock: inventory.ledgerStock(product.id) });
+  const serials = db.prepare(`
+    SELECT s.*, i.invoice_no, pu.purchase_no, pu.invoice_date AS purchased_on
+    FROM serial_numbers s
+    LEFT JOIN invoices i ON i.id = s.invoice_id
+    LEFT JOIN purchases pu ON pu.id = s.purchase_id
+    WHERE s.product_id = ? ORDER BY s.status, s.serial`).all(product.id);
+
+  const sales = db.prepare(`
+    SELECT i.id AS invoice_id, i.invoice_no, i.invoice_date, i.status, c.name AS customer_name,
+      it.qty, it.total
+    FROM invoice_items it
+    JOIN invoices i ON i.id = it.invoice_id
+    LEFT JOIN customers c ON c.id = i.customer_id
+    WHERE it.product_id = ? AND i.status != 'DRAFT'
+    ORDER BY i.invoice_date DESC, i.id DESC LIMIT 50`).all(product.id);
+
+  const purchases = db.prepare(`
+    SELECT pu.id AS purchase_id, pu.purchase_no, pu.invoice_date, s.name AS supplier_name,
+      pi.qty, pi.unit_price, pi.total
+    FROM purchase_items pi
+    JOIN purchases pu ON pu.id = pi.purchase_id
+    LEFT JOIN suppliers s ON s.id = pu.supplier_id
+    WHERE pi.product_id = ?
+    ORDER BY pu.invoice_date DESC, pu.id DESC LIMIT 50`).all(product.id);
+
+  const monthStart = `${new Date().toISOString().slice(0, 7)}-01`;
+  const soldThisMonth = db.prepare(`
+    SELECT COALESCE(SUM(it.qty - it.returned_qty), 0) AS n
+    FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id
+    WHERE it.product_id = ? AND i.status = 'ISSUED' AND i.invoice_date >= ?`).get(product.id, monthStart).n;
+
+  const stats = {
+    stockValue: round2(product.stock * product.purchase_price),
+    soldThisMonth,
+    soldTotal: sales.reduce((sum, r) => sum + (r.status === 'ISSUED' ? r.qty : 0), 0),
+    lastPurchasePrice: purchases.length ? purchases[0].unit_price : null,
+    lastSupplier: purchases.length ? purchases[0].supplier_name : null,
+    serialsAvailable: serials.filter((s2) => s2.status === 'AVAILABLE').length,
+  };
+  res.json({ product, movements, serials, sales, purchases, stats, ledgerStock: inventory.ledgerStock(product.id) });
 }));
 
 router.post('/', requireRole('ADMIN'), wrap((req, res) => {
   const b = req.body;
   required(b, ['name']);
   const categoryId = resolveCategory(b.category);
-  const hsn = resolveHsn(b.hsn_code, b.gst_rate);
+  const fallback = categoryDefaults(categoryId);
+  const hsn = resolveHsn(b.hsn_code || (fallback && fallback.hsn_code), b.gst_rate ?? (fallback && fallback.gst_rate));
   const code = str(b.product_code) || generateCode(str(b.category));
   if (db.prepare('SELECT id FROM products WHERE product_code = ?').get(code)) {
     throw new AppError(`Product ID ${code} is already in use.`, 409);
@@ -115,11 +169,12 @@ router.post('/', requireRole('ADMIN'), wrap((req, res) => {
   const product = tx(() => {
     const id = Number(db.prepare(`
       INSERT INTO products (product_code, name, category_id, brand, model, hsn_id, gst_rate, purchase_price,
-        selling_price, min_stock, serial_tracked, barcode, description, stock)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+        selling_price, min_stock, serial_tracked, barcode, description, location, stock)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
       .run(code, str(b.name), categoryId, str(b.brand), str(b.model), hsn ? hsn.id : null,
-        num(b.gst_rate, hsn ? hsn.gst_rate : 18), num(b.purchase_price), num(b.selling_price),
-        num(b.min_stock), b.serial_tracked ? 1 : 0, str(b.barcode), str(b.description)).lastInsertRowid);
+        num(b.gst_rate, hsn ? hsn.gst_rate : (fallback ? fallback.gst_rate : 18)), num(b.purchase_price),
+        num(b.selling_price), num(b.min_stock), b.serial_tracked ? 1 : 0, str(b.barcode),
+        str(b.description), str(b.location)).lastInsertRowid);
 
     if (openingStock > 0) {
       if (b.serial_tracked && Array.isArray(b.serials) && b.serials.length) {
@@ -154,16 +209,18 @@ router.post('/bulk', requireRole('ADMIN'), wrap((req, res) => {
       const existing = db.prepare('SELECT id, name FROM products WHERE lower(name) = lower(?) AND active = 1').get(name);
       if (existing) { skipped.push({ name, reason: 'ALREADY_EXISTS', productId: existing.id }); continue; }
 
-      const hsn = resolveHsn(row.hsn_code, row.gst_rate);
       const categoryId = row.category ? resolveCategory(row.category) : null;
+      const fallback = categoryDefaults(categoryId);
+      const hsn = resolveHsn(row.hsn_code || (fallback && fallback.hsn_code), row.gst_rate ?? (fallback && fallback.gst_rate));
       const code = str(row.product_code) || generateCode(str(row.category));
       const id = Number(db.prepare(`
         INSERT INTO products (product_code, name, category_id, brand, model, hsn_id, gst_rate, purchase_price,
-          selling_price, min_stock, serial_tracked, barcode, description, stock)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+          selling_price, min_stock, serial_tracked, barcode, description, location, stock)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
         .run(code, name, categoryId, str(row.brand), str(row.model), hsn ? hsn.id : null,
-          num(row.gst_rate, hsn ? hsn.gst_rate : 18), num(row.purchase_price), num(row.selling_price),
-          num(row.min_stock), row.serial_tracked ? 1 : 0, str(row.barcode), str(row.description)).lastInsertRowid);
+          num(row.gst_rate, hsn ? hsn.gst_rate : (fallback ? fallback.gst_rate : 18)), num(row.purchase_price),
+          num(row.selling_price), num(row.min_stock), row.serial_tracked ? 1 : 0, str(row.barcode),
+          str(row.description), str(row.location)).lastInsertRowid);
       created.push(db.prepare(`${SELECT} WHERE p.id = ?`).get(id));
     }
     return { created, skipped };
@@ -180,14 +237,15 @@ router.put('/:id', requireRole('ADMIN'), wrap((req, res) => {
   const hsn = b.hsn_code !== undefined ? resolveHsn(b.hsn_code, b.gst_rate) : null;
   db.prepare(`
     UPDATE products SET name = ?, category_id = ?, brand = ?, model = ?, hsn_id = ?, gst_rate = ?,
-      purchase_price = ?, selling_price = ?, min_stock = ?, serial_tracked = ?, barcode = ?, description = ?, active = ?
+      purchase_price = ?, selling_price = ?, min_stock = ?, serial_tracked = ?, barcode = ?, description = ?,
+      location = ?, active = ?
     WHERE id = ?`)
     .run(str(b.name, current.name) || current.name, categoryId, str(b.brand, current.brand), str(b.model, current.model),
       hsn ? hsn.id : current.hsn_id, num(b.gst_rate, current.gst_rate), num(b.purchase_price, current.purchase_price),
       num(b.selling_price, current.selling_price), num(b.min_stock, current.min_stock),
       b.serial_tracked === undefined ? current.serial_tracked : (b.serial_tracked ? 1 : 0),
       str(b.barcode, current.barcode), str(b.description, current.description),
-      b.active === undefined ? current.active : (b.active ? 1 : 0), id);
+      str(b.location, current.location), b.active === undefined ? current.active : (b.active ? 1 : 0), id);
   res.json({ product: db.prepare(`${SELECT} WHERE p.id = ?`).get(id) });
 }));
 

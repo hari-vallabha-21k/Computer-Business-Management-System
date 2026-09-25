@@ -2,6 +2,7 @@
 const express = require('express');
 const { db, tx, nextNumber, settings } = require('../db');
 const { AppError, wrap, num, str, required, round2, today } = require('../lib/util');
+const { requirePermission, can } = require('../lib/permissions');
 const inv = require('../lib/inventory');
 const { lineTotals, invoiceTotals } = require('../lib/gst');
 const { placeOfSupply, stateCode } = require('../lib/states');
@@ -116,9 +117,19 @@ function placeOfSupplyFor(customer, business) {
   return placeOfSupply(code);
 }
 
+/** Staff may only discount when the owner has allowed it. */
+function guardDiscount(user, items, invoiceDiscount) {
+  if (can(user, 'discount')) return;
+  const discounted = (Array.isArray(items) ? items : []).some((i) => num(i.discount) > 0);
+  if (discounted || num(invoiceDiscount) > 0) {
+    throw new AppError('Sales staff are not allowed to give discounts. Ask the owner to turn this on in Settings.', 403);
+  }
+}
+
 // POST /api/invoices - create DRAFT (no stock movement) or ISSUED directly
-router.post('/', wrap((req, res) => {
+router.post('/', requirePermission('invoices'), wrap((req, res) => {
   const b = req.body;
+  guardDiscount(req.user, b.items, b.discount);
   const business = settings();
   const status = str(b.status, 'DRAFT').toUpperCase();
   if (!['DRAFT', 'ISSUED'].includes(status)) throw new AppError('Status must be DRAFT or ISSUED.', 422);
@@ -155,7 +166,8 @@ router.post('/', wrap((req, res) => {
 }));
 
 // PUT /api/invoices/:id - drafts only
-router.put('/:id', wrap((req, res) => {
+router.put('/:id', requirePermission('invoices'), wrap((req, res) => {
+  guardDiscount(req.user, req.body.items, req.body.discount);
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
   if (!existing) throw new AppError('Invoice not found.', 404);
@@ -235,7 +247,7 @@ function issueInvoice(invoiceId, userId) {
 }
 
 // POST /api/invoices/:id/issue
-router.post('/:id/issue', wrap((req, res) => {
+router.post('/:id/issue', requirePermission('invoices'), wrap((req, res) => {
   const id = Number(req.params.id);
   const out = tx(() => {
     issueInvoice(id, req.user.id);
@@ -245,7 +257,7 @@ router.post('/:id/issue', wrap((req, res) => {
 }));
 
 // POST /api/invoices/:id/serials - reserve serial numbers against a draft line
-router.post('/:id/serials', wrap((req, res) => {
+router.post('/:id/serials', requirePermission('invoices'), wrap((req, res) => {
   const id = Number(req.params.id);
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
   if (!invoice) throw new AppError('Invoice not found.', 404);
@@ -267,7 +279,7 @@ router.post('/:id/serials', wrap((req, res) => {
 }));
 
 // POST /api/invoices/:id/cancel - restores stock (Section 15)
-router.post('/:id/cancel', wrap((req, res) => {
+router.post('/:id/cancel', requirePermission('cancel'), wrap((req, res) => {
   const id = Number(req.params.id);
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
   if (!invoice) throw new AppError('Invoice not found.', 404);
@@ -295,7 +307,7 @@ router.post('/:id/cancel', wrap((req, res) => {
   res.json(out);
 }));
 
-router.delete('/:id', wrap((req, res) => {
+router.delete('/:id', requirePermission('invoices'), wrap((req, res) => {
   const id = Number(req.params.id);
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
   if (!invoice) throw new AppError('Invoice not found.', 404);

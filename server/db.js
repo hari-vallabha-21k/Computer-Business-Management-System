@@ -272,6 +272,21 @@ const MIGRATIONS = [
   ['invoices', 'price_includes_gst', 'INTEGER NOT NULL DEFAULT 0'],
   ['customers', 'shipping_address', "TEXT DEFAULT ''"],
   ['customers', 'state_code', "TEXT DEFAULT ''"],
+  // Fields the Retail Manager screens rely on.
+  ['business_settings', 'staff_permissions', "TEXT DEFAULT ''"],
+  ['business_settings', 'print_serials', 'INTEGER NOT NULL DEFAULT 1'],
+  ['business_settings', 'low_stock_alerts', "TEXT NOT NULL DEFAULT 'NOTIFY'"],
+  ['business_settings', 'text_size', "TEXT NOT NULL DEFAULT 'normal'"],
+  ['categories', 'hsn_id', 'INTEGER REFERENCES hsn_codes(id)'],
+  ['categories', 'gst_rate', 'REAL NOT NULL DEFAULT 18'],
+  ['products', 'location', "TEXT DEFAULT ''"],
+  ['users', 'phone', "TEXT DEFAULT ''"],
+  ['users', 'last_login_at', 'TEXT'],
+  ['purchases', 'payment_terms', "TEXT DEFAULT ''"],
+  ['purchases', 'due_date', 'TEXT'],
+  ['purchases', 'flagged_items', 'INTEGER NOT NULL DEFAULT 0'],
+  ['purchases', 'checked_at', 'TEXT'],
+  ['purchases', 'checked_by', 'INTEGER REFERENCES users(id)'],
 ];
 for (const [table, column, definition] of MIGRATIONS) ensureColumn(table, column, definition);
 

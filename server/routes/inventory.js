@@ -4,6 +4,7 @@ const { db, tx, nextNumber, settings } = require('../db');
 const { AppError, wrap, num, str, required, round2 } = require('../lib/util');
 const inv = require('../lib/inventory');
 const { requireRole } = require('../lib/auth');
+const { requirePermission } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -29,15 +30,25 @@ router.get('/movements', wrap((req, res) => {
 // GET /api/inventory/low-stock
 router.get('/low-stock', wrap((req, res) => {
   const items = db.prepare(`
-    SELECT p.id, p.product_code, p.name, p.brand, p.stock, p.min_stock, p.selling_price, c.name AS category
+    SELECT p.id, p.product_code, p.name, p.brand, p.stock, p.min_stock, p.selling_price, p.location,
+      c.name AS category,
+      (SELECT s.name FROM purchase_items pi
+        JOIN purchases pu ON pu.id = pi.purchase_id
+        LEFT JOIN suppliers s ON s.id = pu.supplier_id
+        WHERE pi.product_id = p.id AND s.name IS NOT NULL
+        ORDER BY pu.id DESC LIMIT 1) AS usual_supplier
     FROM products p LEFT JOIN categories c ON c.id = p.category_id
     WHERE p.active = 1 AND (p.stock <= 0 OR (p.min_stock > 0 AND p.stock <= p.min_stock))
     ORDER BY (p.stock <= 0) DESC, p.stock ASC`).all();
-  res.json({ items });
+  res.json({
+    items,
+    outOfStock: items.filter((i) => i.stock <= 0).length,
+    low: items.filter((i) => i.stock > 0).length,
+  });
 }));
 
 // POST /api/inventory/add-stock - manual stock entry (Section 11)
-router.post('/add-stock', wrap((req, res) => {
+router.post('/add-stock', requirePermission('stock'), wrap((req, res) => {
   const b = req.body;
   required(b, ['product_id', 'qty']);
   const productId = Number(b.product_id);
@@ -124,7 +135,7 @@ router.post('/adjust', requireRole('ADMIN'), wrap((req, res) => {
 }));
 
 // ---- Serial numbers ----
-router.get('/serials', wrap((req, res) => {
+router.get('/serials', requirePermission('serials'), wrap((req, res) => {
   const where = [];
   const params = [];
   if (req.query.q) { where.push('s.serial LIKE ?'); params.push(`%${str(req.query.q)}%`); }
@@ -141,7 +152,43 @@ router.get('/serials', wrap((req, res) => {
   res.json({ serials: db.prepare(sql).all(...params) });
 }));
 
-router.post('/serials', wrap((req, res) => {
+/** One serial number and everything that ever happened to it. */
+router.get('/serials/:id', requirePermission('serials'), wrap((req, res) => {
+  const serial = db.prepare(`
+    SELECT s.*, p.name AS product_name, p.product_code, i.invoice_no, i.invoice_date,
+      c.name AS customer_name, pu.purchase_no, pu.invoice_date AS purchased_on, su.name AS supplier_name
+    FROM serial_numbers s
+    JOIN products p ON p.id = s.product_id
+    LEFT JOIN invoices i ON i.id = s.invoice_id
+    LEFT JOIN customers c ON c.id = i.customer_id
+    LEFT JOIN purchases pu ON pu.id = s.purchase_id
+    LEFT JOIN suppliers su ON su.id = pu.supplier_id
+    WHERE s.id = ?`).get(Number(req.params.id));
+  if (!serial) throw new AppError('Serial number not found.', 404);
+
+  const timeline = [];
+  if (serial.purchase_no) {
+    timeline.push({
+      date: serial.purchased_on || serial.created_at,
+      what: 'Received into stock',
+      detail: `${serial.purchase_no}${serial.supplier_name ? ` · ${serial.supplier_name}` : ''}`,
+      link: `#/purchases/${serial.purchase_id}`,
+    });
+  } else {
+    timeline.push({ date: serial.created_at, what: 'Added to stock', detail: 'Entered by hand', link: '' });
+  }
+  if (serial.invoice_no) {
+    timeline.push({
+      date: serial.invoice_date,
+      what: serial.status === 'RETURNED' ? 'Sold, then returned' : 'Sold',
+      detail: `${serial.invoice_no}${serial.customer_name ? ` · ${serial.customer_name}` : ''}`,
+      link: `#/sales/invoice/${serial.invoice_id}`,
+    });
+  }
+  res.json({ serial, timeline });
+}));
+
+router.post('/serials', requirePermission('stock'), wrap((req, res) => {
   required(req.body, ['product_id', 'serials']);
   const productId = Number(req.body.product_id);
   const serials = (Array.isArray(req.body.serials) ? req.body.serials : String(req.body.serials).split(/[\s,]+/))

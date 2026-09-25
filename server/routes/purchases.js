@@ -6,6 +6,7 @@ const { AppError, wrap, num, str, required, round2, today } = require('../lib/ut
 const inv = require('../lib/inventory');
 const { extractPurchaseInvoice } = require('../lib/extract');
 const { resolveHsn, resolveCategory, generateCode } = require('./products');
+const { requirePermission } = require('../lib/permissions');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -86,7 +87,7 @@ router.post('/extract', upload.any(), wrap((req, res) => {
  * POST /api/purchases - confirm a purchase (manual or reviewed scan) and add stock.
  * Items may reference an existing product_id or carry new_product details.
  */
-router.post('/', wrap((req, res) => {
+router.post('/', requirePermission('stock'), wrap((req, res) => {
   const b = req.body;
   required(b, ['items']);
   const rawItems = Array.isArray(b.items) ? b.items : [];
@@ -102,14 +103,20 @@ router.post('/', wrap((req, res) => {
         .run(name, str(b.supplier_gstin).toUpperCase()).lastInsertRowid);
   }
 
+  // Lines the scan could not read confidently come back marked; the purchase is
+  // booked in but flagged, so the owner can check it against the paper bill.
+  const flagged = rawItems.filter((raw) => raw.needs_review === true || raw.verify === true).length;
+
   const out = tx(() => {
     const purchaseNo = nextNumber(settings().purchase_prefix || 'PUR');
     const purchaseId = Number(db.prepare(`
       INSERT INTO purchases (purchase_no, supplier_id, supplier_invoice_no, invoice_date, status, source,
-        file_name, subtotal, gst_amount, total, notes, created_by)
-      VALUES (?, ?, ?, ?, 'CONFIRMED', ?, ?, 0, 0, 0, ?, ?)`)
+        file_name, subtotal, gst_amount, total, notes, payment_terms, due_date, flagged_items, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)`)
       .run(purchaseNo, supplierId, str(b.supplier_invoice_no), str(b.invoice_date) || today(),
-        str(b.source, 'MANUAL').toUpperCase(), str(b.file_name), str(b.notes), req.user.id).lastInsertRowid);
+        flagged > 0 ? 'NEEDS_REVIEW' : 'CONFIRMED',
+        str(b.source, 'MANUAL').toUpperCase(), str(b.file_name), str(b.notes),
+        str(b.payment_terms), str(b.due_date) || null, flagged, req.user.id).lastInsertRowid);
 
     let subtotal = 0;
     let gstTotal = 0;
@@ -168,9 +175,23 @@ router.post('/', wrap((req, res) => {
 
     db.prepare('UPDATE purchases SET subtotal = ?, gst_amount = ?, total = ? WHERE id = ?')
       .run(subtotal, gstTotal, round2(subtotal + gstTotal), purchaseId);
-    return { purchaseId, purchaseNo, subtotal, gstAmount: gstTotal, total: round2(subtotal + gstTotal) };
+    return {
+      purchaseId, purchaseNo, subtotal, gstAmount: gstTotal, total: round2(subtotal + gstTotal),
+      units: rawItems.reduce((sum, raw) => sum + num(raw.qty), 0),
+      flaggedItems: flagged, status: flagged > 0 ? 'NEEDS_REVIEW' : 'CONFIRMED',
+    };
   });
   res.status(201).json(out);
+}));
+
+/** "Mark as checked" on a scanned purchase whose lines were flagged. */
+router.post('/:id/checked', wrap((req, res) => {
+  const id = Number(req.params.id);
+  const purchase = db.prepare('SELECT * FROM purchases WHERE id = ?').get(id);
+  if (!purchase) throw new AppError('Purchase not found.', 404);
+  db.prepare(`UPDATE purchases SET status = 'CONFIRMED', flagged_items = 0, checked_at = datetime('now'), checked_by = ?
+    WHERE id = ?`).run(req.user.id, id);
+  res.json({ purchase: db.prepare('SELECT * FROM purchases WHERE id = ?').get(id) });
 }));
 
 module.exports = router;

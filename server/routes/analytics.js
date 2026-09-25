@@ -2,6 +2,8 @@
 const express = require('express');
 const { db } = require('../db');
 const { wrap, num, str, round2, dateRange } = require('../lib/util');
+const { requireRole } = require('../lib/auth');
+const { can } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -87,26 +89,29 @@ router.get('/dashboard', wrap((req, res) => {
 
   const drafts = db.prepare("SELECT COUNT(*) AS n FROM invoices WHERE status = 'DRAFT'").get().n;
 
-  res.json({
-    range: { from, to },
-    kpis: {
-      totalSales: current.revenueWithTax,
-      netRevenue: current.revenue,
-      itemsSold: current.unitsSold,
-      invoices: current.invoices,
-      grossProfit: current.grossProfit,
-      cost: current.cost,
-      currentStock: round2(stock.units),
-      stockValue: round2(stock.value),
-      totalProducts: stock.products,
-      lowStockItems: stock.low_stock,
-      outOfStock: stock.out_of_stock,
-      totalPurchases: round2(purchases.total),
-      purchaseCount: purchases.count,
-      draftInvoices: drafts,
-    },
-    comparison,
-  });
+  const costsHidden = !can(req.user, 'costs');
+  const kpis = {
+    totalSales: current.revenueWithTax,
+    netRevenue: current.revenue,
+    itemsSold: current.unitsSold,
+    invoices: current.invoices,
+    grossProfit: current.grossProfit,
+    cost: current.cost,
+    currentStock: round2(stock.units),
+    stockValue: round2(stock.value),
+    totalProducts: stock.products,
+    lowStockItems: stock.low_stock,
+    outOfStock: stock.out_of_stock,
+    totalPurchases: round2(purchases.total),
+    purchaseCount: purchases.count,
+    draftInvoices: drafts,
+  };
+  // Purchase prices and margins are the owner's business unless shared.
+  if (costsHidden) {
+    for (const key of ['grossProfit', 'cost', 'stockValue', 'totalPurchases', 'purchaseCount', 'netRevenue']) delete kpis[key];
+    if (comparison) delete comparison.change.grossProfit;
+  }
+  res.json({ range: { from, to }, kpis, comparison });
 }));
 
 // GET /api/analytics/sales-trend?bucket=day|week|month
@@ -121,7 +126,23 @@ router.get('/sales-trend', wrap((req, res) => {
            COUNT(DISTINCT i.id) AS invoices
     ${ITEM_JOIN} WHERE ${clause}
     GROUP BY period ORDER BY period`).all(...params);
-  res.json({ trend: rows.map((r) => ({ ...r, sales: round2(r.sales), units: round2(r.units) })) });
+  const clean = (list) => list.map((r) => ({ ...r, sales: round2(r.sales), units: round2(r.units) }));
+
+  // The dashed "last period" line on the analytics chart.
+  let previous = null;
+  if (req.query.compare === 'true') {
+    const [from, to] = dateRange(req.query);
+    const [pFrom, pTo] = previousRange(from, to);
+    const prev = salesFilter({ ...req.query, from: pFrom, to: pTo });
+    previous = clean(db.prepare(`
+      SELECT strftime('${fmt}', i.invoice_date) AS period,
+             COALESCE(SUM((it.qty - it.returned_qty) * (it.total / NULLIF(it.qty, 0))), 0) AS sales,
+             COALESCE(SUM(it.qty - it.returned_qty), 0) AS units,
+             COUNT(DISTINCT i.id) AS invoices
+      ${ITEM_JOIN} WHERE ${prev.clause}
+      GROUP BY period ORDER BY period`).all(...prev.params));
+  }
+  res.json({ trend: clean(rows), previous });
 }));
 
 // GET /api/analytics/by-product
@@ -162,7 +183,7 @@ router.get('/by-category', wrap((req, res) => {
 }));
 
 // GET /api/analytics/by-hsn
-router.get('/by-hsn', wrap((req, res) => {
+router.get('/by-hsn', requireRole('ADMIN'), wrap((req, res) => {
   const { clause, params } = salesFilter(req.query);
   const rows = db.prepare(`
     SELECT COALESCE(NULLIF(it.hsn_code, ''), 'Not set') AS hsn_code,
@@ -181,7 +202,7 @@ router.get('/by-hsn', wrap((req, res) => {
 }));
 
 // GET /api/analytics/inventory
-router.get('/inventory', wrap((req, res) => {
+router.get('/inventory', requireRole('ADMIN'), wrap((req, res) => {
   const byCategory = db.prepare(`
     SELECT COALESCE(c.name, 'Uncategorised') AS category, COUNT(*) AS products,
            COALESCE(SUM(p.stock), 0) AS units, COALESCE(SUM(p.stock * p.purchase_price), 0) AS value
