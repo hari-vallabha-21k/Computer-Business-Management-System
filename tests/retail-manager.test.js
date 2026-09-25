@@ -225,3 +225,59 @@ test('the invoice numbering can be set to continue from a given number', async (
   const invoice = await api('POST', '/api/invoices', { items: [{ product_id: product.id, qty: 1 }] }, 'admin');
   assert.match(invoice.body.invoice.invoice_no, /5000$/);
 });
+
+// ---- Fixes from the code review ----
+
+test('staff never receive cost or profit, even from top products or the comparison', async () => {
+  await setPermissions({ costs: false });
+  const top = await api('GET', '/api/analytics/by-product', undefined, 'staff');
+  assert.equal(top.status, 200);
+  for (const p of top.body.products) {
+    assert.equal(p.cost, undefined);
+    assert.equal(p.grossProfit, undefined);
+  }
+  const dash = await api('GET', '/api/analytics/dashboard?compare=true', undefined, 'staff');
+  assert.equal(dash.body.comparison.previous.cost, undefined);
+  assert.equal(dash.body.comparison.previous.grossProfit, undefined);
+
+  const owner = await api('GET', '/api/analytics/by-product', undefined, 'admin');
+  if (owner.body.products.length) assert.ok(owner.body.products[0].grossProfit !== undefined);
+});
+
+test('only the owner can clear a flagged purchase', async () => {
+  const product = await makeProduct({ name: 'Design Guard Item', opening_stock: 0 });
+  const created = await api('POST', '/api/purchases', {
+    supplier_name: 'Design Distributors', source: 'SCAN',
+    items: [{ product_id: product.id, qty: 1, unit_price: 100, needs_review: true }],
+  }, 'admin');
+  const res = await api('POST', `/api/purchases/${created.body.purchaseId}/checked`, {}, 'staff');
+  assert.equal(res.status, 403);
+});
+
+test('the invoice tax headers use the invoice’s own GST rate', () => {
+  const { columns, sharedRate } = require('../server/lib/invoicedoc');
+  assert.equal(sharedRate([{ gst_rate: 28 }, { gst_rate: 28 }]), 28);
+  assert.equal(sharedRate([{ gst_rate: 12 }, { gst_rate: 18 }]), null);
+  const intra = columns(30, 535, false, 12).map((c) => c.label);
+  assert.ok(intra.includes('6% CGST\nAmount') && intra.includes('6% SGST\nAmount'));
+  const inter = columns(30, 535, true, 28).map((c) => c.label);
+  assert.ok(inter.includes('28% IGST\nAmount'));
+  const mixed = columns(30, 535, false, null).map((c) => c.label);
+  assert.ok(mixed.includes('CGST\nAmount'), 'mixed rates name the tax without a wrong percentage');
+});
+
+test('a long invoice flows onto further pages instead of off the bottom', async () => {
+  const product = await makeProduct({ name: 'Design Many Lines Item', opening_stock: 100, selling_price: 100 });
+  const items = Array.from({ length: 60 }, () => ({ product_id: product.id, qty: 1 }));
+  const invoice = await api('POST', '/api/invoices', { status: 'ISSUED', items }, 'admin');
+  assert.equal(invoice.status, 201);
+  const res = await fetch(url(`/api/invoices/${invoice.body.invoice.id}/pdf`), {
+    headers: { authorization: `Bearer ${tokens.admin}` },
+  });
+  const pdf = Buffer.from(await res.arrayBuffer()).toString('latin1');
+  const pages = (pdf.match(/\/Type\s*\/Page[^s]/g) || []).length;
+  assert.ok(pages >= 2, `expected several pages, got ${pages}`);
+  const text = await require('../server/lib/extract').pdfText(Buffer.from(pdf, 'latin1'));
+  assert.match(text, /Declaration/, 'the footer blocks are still printed');
+  assert.match(text, /Page \d of \d/);
+});

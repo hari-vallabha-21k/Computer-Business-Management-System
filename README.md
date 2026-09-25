@@ -45,7 +45,7 @@ password-holder in **Settings → Users** before using this with real data.
 Requires Node.js 22.5 or newer (it uses the built-in `node:sqlite`).
 
 ```bash
-npm test          # 53 tests: business rules, scanning, multi-invoice, invoice template, screens
+npm test          # 58 tests: business rules, scanning, multi-invoice, invoice template, screens
 npm run dev       # auto-restarting dev server
 ```
 

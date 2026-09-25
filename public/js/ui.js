@@ -233,8 +233,13 @@
         if (handler) handler(button.closest('[data-id]'));
       }));
     });
-    document.addEventListener('click', () => root.querySelectorAll('.menu').forEach((m) => { m.hidden = true; }));
   }
+
+  // One document-level listener closes whichever menu is open; wiring a page
+  // no longer adds another, so nothing piles up as you move between pages.
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.menu-wrap .menu').forEach((m) => { m.hidden = true; });
+  });
 
   /** Clickable rows: wire every element carrying data-href. */
   function wireLinks(root) {

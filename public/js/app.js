@@ -101,7 +101,7 @@
   }
 
   function renderNav() {
-    const current = window.location.hash || '#/';
+    const current = (window.location.hash || '#/').split('?')[0];
     const allowed = (item) => (!item.admin || window.api.isAdmin())
       && (!item.permission || window.api.can(item.permission));
 
@@ -118,7 +118,8 @@
 
   async function route() {
     const view = document.getElementById('view');
-    const path = (window.location.hash || '#/').slice(1) || '/';
+    // "?product=5" carries context for the page; it is not part of the route.
+    const path = (window.location.hash || '#/').slice(1).split('?')[0] || '/';
     renderNav();
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('scrim').hidden = true;
