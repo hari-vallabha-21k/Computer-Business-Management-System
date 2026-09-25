@@ -6,7 +6,7 @@
   "type": "commonjs",
   "main": "server/index.js",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "start": "node --no-warnings server/index.js",

@@ -42,7 +42,7 @@ password-holder in **Settings → Users** before using this with real data.
 | `SESSION_SECRET` | dev value | HMAC key for session tokens — **set this in production** |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `owner@example.com` / `owner123` | First admin on an empty database |
 
-Requires Node.js 22.5 or newer (it uses the built-in `node:sqlite`).
+Requires Node.js 22.13 or newer (it uses the built-in `node:sqlite`).
 
 ## Running the Project Locally
 
