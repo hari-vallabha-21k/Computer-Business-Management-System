@@ -3,7 +3,7 @@
 (function () {
   'use strict';
   const {
-    esc, money, qty, date, dateTime, table, loading, skeleton, toast, errorToast, modal, confirm,
+    esc, money, rupees, qty, date, dateTime, table, loading, skeleton, toast, errorToast, modal, confirm,
     statusTag, stockTag, stockState, MOVEMENT_LABEL, productSearch, partySearch, formValues,
     pageHead, tiles, tabs, wireTabs, wireLinks, moreMenu, wireMenus, emptyState,
   } = window.ui;
@@ -1163,8 +1163,158 @@
     }
   }
 
+  // ---------- HSN Code ----------
+  async function hsn(view) {
+    view.innerHTML = `
+      ${pageHead({
+    title: 'HSN Code',
+    sub: 'View sales and tax details grouped by HSN code.',
+    actions: '<button class="btn" id="export-excel">Export Excel</button>',
+  })}
+      <div class="filters">
+        ${searchField('q', 'Search HSN number…')}
+        <select id="period" aria-label="Date">
+          <option value="month">This month</option>
+          <option value="last30">Last 30 days</option>
+          <option value="year">This year</option>
+          <option value="all">Everything</option>
+        </select>
+      </div>
+      <div class="card" id="list">${skeleton(8)}</div>`;
+
+    const load = async () => {
+      const { from, to } = window.ui.range(view.querySelector('#period').value);
+      const q = view.querySelector('#q').value.trim();
+      const { hsn: rows } = await window.api.get('/api/hsn', { q, from, to });
+      
+      const list = view.querySelector('#list');
+      list.innerHTML = rows.length ? table(rows, [
+        { label: 'HSN Code', class: 'doc', render: (r) => esc(r.hsn_code) },
+        { label: 'Products', render: (r) => esc(r.product_names) },
+        { label: 'Qty Sold', num: true, render: (r) => qty(r.qty_sold) },
+        { label: 'Taxable Amount', num: true, render: (r) => rupees(r.taxable_amount) },
+        { label: 'CGST (9%)', num: true, render: (r) => rupees(r.cgst) },
+        { label: 'SGST (9%)', num: true, render: (r) => rupees(r.sgst) },
+        { label: 'Total GST', num: true, render: (r) => rupees(r.total_gst) },
+      ], { rowAttrs: (r) => `data-href="#/inventory/hsn/${encodeURIComponent(r.hsn_code)}"` }) : '<div class="empty"><h3>No HSN data found</h3><p>Try adjusting your search or date range.</p></div>';
+      
+      wireLinks(list);
+      
+      // Wire Export to Excel
+      view.querySelector('#export-excel').onclick = () => {
+        if (!rows.length) return toast('No data to export', 'error');
+        
+        let csv = 'HSN Code,Products,Quantity,Taxable Amount,CGST,SGST,Total GST,Invoice total amount\n';
+        rows.forEach(r => {
+          const names = '"' + (r.product_names || '').replace(/"/g, '""') + '"';
+          const totalAmount = r.taxable_amount + r.total_gst;
+          csv += `${r.hsn_code},${names},${r.qty_sold},${r.taxable_amount.toFixed(2)},${r.cgst.toFixed(2)},${r.sgst.toFixed(2)},${r.total_gst.toFixed(2)},${totalAmount.toFixed(2)}\n`;
+        });
+        
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `HSN_Report_${window.ui.todayIso()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+    };
+
+    let timer;
+    view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 250); });
+    view.querySelector('#period').addEventListener('change', load);
+    
+    await load();
+  }
+
+  // ---------- HSN Code Detail ----------
+  async function hsnDetail(view, code) {
+    view.innerHTML = `
+      ${pageHead({
+    title: 'Loading...',
+    back: '#/inventory/hsn',
+  })}
+      <div id="content" class="pad">${skeleton(10)}</div>`;
+
+    try {
+      const data = await window.api.get(`/api/hsn/${encodeURIComponent(code)}`);
+      
+      let html = `
+        ${pageHead({
+        title: `HSN: ${esc(data.hsn.code)}`,
+        sub: esc(data.hsn.description),
+        back: '#/inventory/hsn',
+      })}
+        <div class="row">
+          <div class="card col">
+            <div class="card-head"><h2>Details</h2></div>
+            <div class="pad form-grid">
+              <label>HSN Code<input value="${esc(data.hsn.code)}" readonly></label>
+              <label>GST Rate<input value="${data.hsn.gst_rate}%" readonly></label>
+              <label class="full">Description<input value="${esc(data.hsn.description)}" readonly></label>
+            </div>
+          </div>
+        </div>
+        
+        <div class="card" style="margin-top:24px">
+          <div class="card-head"><h2>Associated Products (${data.products.length})</h2></div>
+          ${data.products.length ? table(data.products, [
+          { label: 'Product Code', class: 'doc', render: (r) => esc(r.product_code) },
+          { label: 'Name', render: (r) => esc(r.name) },
+          { label: 'Brand', render: (r) => esc(r.brand) },
+          { label: 'Stock', num: true, render: (r) => qty(r.stock) },
+          { label: 'Selling Price', num: true, render: (r) => money(r.selling_price) },
+        ], { rowAttrs: (r) => `data-href="#/inventory/product/${r.id}"` }) : '<div class="empty"><p>No products linked.</p></div>'}
+        </div>
+        
+        <div class="card" style="margin-top:24px">
+          <div class="card-head">
+            <h2>Sales History</h2>
+            ${data.sales.length ? '<button id="export-hsn-excel" class="btn">Export Excel</button>' : ''}
+          </div>
+          ${data.sales.length ? table(data.sales, [
+          { label: 'Invoice No.', class: 'doc', render: (r) => esc(r.invoice_no) },
+          { label: 'Date', render: (r) => date(r.invoice_date) },
+          { label: 'Product', render: (r) => esc(r.product_name) },
+          { label: 'Qty', num: true, render: (r) => qty(r.qty) },
+          { label: 'Unit Price', num: true, render: (r) => money(r.unit_price) },
+          { label: 'Taxable Amount', num: true, render: (r) => rupees(r.taxable_value) },
+          { label: 'GST', num: true, render: (r) => rupees(r.gst_amount) },
+          { label: 'Total', num: true, render: (r) => rupees(r.total) },
+        ], { rowAttrs: (r) => `data-href="#/sales/invoice/${r.invoice_id}"` }) : '<div class="empty"><p>No sales history.</p></div>'}
+        </div>
+      `;
+      view.innerHTML = html;
+      wireLinks(view);
+      
+      const exportBtn = view.querySelector('#export-hsn-excel');
+      if (exportBtn) {
+        exportBtn.onclick = () => {
+          let csv = 'Invoice number,Date,Billed to,Total Taxable amount,CGST,SGST,Total gst,Invoice total\n';
+          data.sales.forEach(r => {
+            const customer = '"' + (r.customer_name || 'Walk-in').replace(/"/g, '""') + '"';
+            const cgst = (r.gst_amount / 2).toFixed(2);
+            const sgst = (r.gst_amount / 2).toFixed(2);
+            csv += `${r.invoice_no},"${date(r.invoice_date)}",${customer},${r.taxable_value.toFixed(2)},${cgst},${sgst},${r.gst_amount.toFixed(2)},${r.total.toFixed(2)}\n`;
+          });
+          const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `HSN_${data.hsn.code}_Sales_${window.ui.todayIso()}.csv`;
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+      }
+    } catch (err) {
+      errorToast(err);
+      view.innerHTML = emptyState('Error loading HSN details', err.message);
+    }
+  }
+
   window.Pages = window.Pages || {};
   window.Pages.inventory = {
-    overview, products, addProduct, addStock, movements, adjust, lowStock, serials, hsn, productDetail,
+    overview, products, addProduct, addStock, movements, adjust, lowStock, serials, hsn, hsnDetail, productDetail,
   };
 })();

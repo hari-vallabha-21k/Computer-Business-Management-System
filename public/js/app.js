@@ -29,6 +29,7 @@
         { href: '#/inventory/movements', label: 'Stock Movements', match: /^#\/inventory\/(movements|adjust)/ },
         { href: '#/inventory/low-stock', label: 'Low Stock', badge: 'lowStock' },
         { href: '#/inventory/serials', label: 'Serial Numbers', permission: 'serials' },
+        { href: '#/inventory/hsn', label: 'HSN Code', admin: true, match: /^#\/inventory\/hsn/ },
       ],
     },
     {
@@ -64,6 +65,7 @@
     [/^\/inventory\/low-stock$/, (view) => window.Pages.inventory.lowStock(view)],
     [/^\/inventory\/serials$/, (view) => window.Pages.inventory.serials(view)],
     [/^\/inventory\/hsn$/, (view) => window.Pages.inventory.hsn(view)],
+    [/^\/inventory\/hsn\/([^/]+)$/, (view, code) => window.Pages.inventory.hsnDetail(view, decodeURIComponent(code))],
     [/^\/inventory\/product\/(\d+)$/, (view, id) => window.Pages.inventory.productDetail(view, id)],
     [/^\/purchases\/?$/, (view) => window.Pages.purchases.history(view)],
     [/^\/purchases\/add$/, (view) => window.Pages.purchases.add(view)],

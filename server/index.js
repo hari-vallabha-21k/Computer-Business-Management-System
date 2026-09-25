@@ -41,6 +41,7 @@ api.get('/invoices/:id/pdf', async (req, res, next) => {
   try {
     const { invoice, items } = loadInvoice(Number(req.params.id));
     res.set('Content-Type', 'application/pdf');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     res.set('Content-Disposition', `${req.query.inline === 'true' ? 'inline' : 'attachment'}; filename="${invoice.invoice_no}.pdf"`);
     await renderInvoicePdf(res, {
       invoice, items, business: settings(),

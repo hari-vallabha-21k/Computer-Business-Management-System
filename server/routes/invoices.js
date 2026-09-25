@@ -83,6 +83,7 @@ router.get('/', wrap((req, res) => {
   const where = [];
   const params = [];
   if (req.query.status) { where.push('i.status = ?'); params.push(str(req.query.status).toUpperCase()); }
+  if (req.query.paymentStatus) { where.push("COALESCE(i.payment_status, 'UNPAID') = ?"); params.push(str(req.query.paymentStatus).toUpperCase()); }
   if (req.query.customerId) { where.push('i.customer_id = ?'); params.push(Number(req.query.customerId)); }
   if (req.query.from) { where.push('i.invoice_date >= ?'); params.push(str(req.query.from)); }
   if (req.query.to) { where.push('i.invoice_date <= ?'); params.push(str(req.query.to)); }
@@ -149,9 +150,9 @@ router.post('/', requirePermission('invoices'), wrap((req, res) => {
       INSERT INTO invoices (invoice_no, customer_id, invoice_date, status, payment_mode, payment_status, notes,
         payment_terms, due_date, place_of_supply, ship_to_name, ship_to_address, product_brief,
         price_includes_gst, created_by)
-      VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      VALUES (?, ?, ?, 'DRAFT', ?, 'UNPAID', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(invoiceNo, customer ? customer.id : null, invoiceDate,
-        str(b.payment_mode, 'CASH'), str(b.payment_status, 'PAID'), str(b.notes),
+        str(b.payment_mode, 'CASH'), str(b.notes),
         terms, str(b.due_date) || dueDateFor(invoiceDate, terms),
         str(b.place_of_supply) || placeOfSupplyFor(customer, business),
         str(b.ship_to_name) || (customer ? customer.name : ''),
@@ -159,6 +160,15 @@ router.post('/', requirePermission('invoices'), wrap((req, res) => {
         str(b.product_brief), priceIncludesGst ? 1 : 0, req.user.id).lastInsertRowid);
     const saved = persistLines(invoiceId, lines);
     saveTotals(invoiceId, saved, customer ? customer.gstin : '');
+    
+    // Handle initial payment
+    const initialPayment = num(b.amount_paid);
+    if (initialPayment > 0) {
+      db.prepare(`INSERT INTO invoice_payments (invoice_id, amount, payment_date, payment_mode, note, created_by)
+        VALUES (?, ?, ?, ?, 'Initial payment', ?)`).run(invoiceId, initialPayment, invoiceDate, str(b.payment_mode, 'CASH'), req.user.id);
+    }
+    refreshPaymentTotals(invoiceId);
+
     if (status === 'ISSUED') issueInvoice(invoiceId, req.user.id);
     return loadInvoice(invoiceId);
   });
@@ -182,11 +192,11 @@ router.put('/:id', requirePermission('invoices'), wrap((req, res) => {
   const out = tx(() => {
     const invoiceDate = str(req.body.invoice_date) || existing.invoice_date;
     const terms = str(req.body.payment_terms, existing.payment_terms);
-    db.prepare(`UPDATE invoices SET customer_id = ?, invoice_date = ?, payment_mode = ?, payment_status = ?, notes = ?,
+    db.prepare(`UPDATE invoices SET customer_id = ?, invoice_date = ?, payment_mode = ?, notes = ?,
       payment_terms = ?, due_date = ?, place_of_supply = ?, ship_to_name = ?, ship_to_address = ?, product_brief = ?,
       price_includes_gst = ? WHERE id = ?`)
       .run(customer ? customer.id : null, invoiceDate,
-        str(req.body.payment_mode, existing.payment_mode), str(req.body.payment_status, existing.payment_status),
+        str(req.body.payment_mode, existing.payment_mode),
         str(req.body.notes, existing.notes), terms,
         str(req.body.due_date) || dueDateFor(invoiceDate, terms),
         str(req.body.place_of_supply) || placeOfSupplyFor(customer, business),
@@ -195,6 +205,18 @@ router.put('/:id', requirePermission('invoices'), wrap((req, res) => {
         str(req.body.product_brief, existing.product_brief), priceIncludesGst ? 1 : 0, id);
     const saved = persistLines(id, lines);
     saveTotals(id, saved, customer ? customer.gstin : '');
+    
+    // Update initial payment if provided during draft edit
+    if (req.body.amount_paid !== undefined) {
+      const newPayment = num(req.body.amount_paid);
+      db.prepare('DELETE FROM invoice_payments WHERE invoice_id = ? AND note = ?').run(id, 'Initial payment');
+      if (newPayment > 0) {
+         db.prepare(`INSERT INTO invoice_payments (invoice_id, amount, payment_date, payment_mode, note, created_by)
+          VALUES (?, ?, ?, ?, 'Initial payment', ?)`).run(id, newPayment, invoiceDate, str(req.body.payment_mode, existing.payment_mode), req.user.id);
+      }
+    }
+    refreshPaymentTotals(id);
+
     return loadInvoice(id);
   });
   res.json(out);
@@ -317,6 +339,77 @@ router.delete('/:id', requirePermission('invoices'), wrap((req, res) => {
     db.prepare('DELETE FROM invoices WHERE id = ?').run(id);
   });
   res.json({ ok: true });
+}));
+
+// ---------- Payment tracking ----------
+
+/** Recalculate the cached amount_paid on an invoice and auto-set payment_status. */
+function refreshPaymentTotals(invoiceId) {
+  const row = db.prepare('SELECT COALESCE(SUM(amount), 0) AS paid FROM invoice_payments WHERE invoice_id = ?').get(invoiceId);
+  const paid = round2(row.paid);
+  db.prepare('UPDATE invoices SET amount_paid = ? WHERE id = ?').run(paid, invoiceId);
+  const inv = db.prepare('SELECT total FROM invoices WHERE id = ?').get(invoiceId);
+  const total = round2(inv.total);
+  let status = 'UNPAID';
+  if (paid >= total) status = 'PAID';
+  else if (paid > 0) status = 'PARTIAL';
+  db.prepare('UPDATE invoices SET payment_status = ? WHERE id = ?').run(status, invoiceId);
+  return { amountPaid: paid, balance: round2(total - paid), paymentStatus: status };
+}
+
+// GET /api/invoices/:id/payments - payment history
+router.get('/:id/payments', wrap((req, res) => {
+  const id = Number(req.params.id);
+  const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
+  if (!invoice) throw new AppError('Invoice not found.', 404);
+  const payments = db.prepare(`
+    SELECT p.*, u.name AS created_by_name
+    FROM invoice_payments p LEFT JOIN users u ON u.id = p.created_by
+    WHERE p.invoice_id = ? ORDER BY p.payment_date ASC, p.id ASC`).all(id);
+  const balance = round2(invoice.total - invoice.amount_paid);
+  res.json({
+    payments,
+    total: invoice.total,
+    amountPaid: invoice.amount_paid,
+    balance,
+    paymentStatus: invoice.payment_status,
+  });
+}));
+
+// POST /api/invoices/:id/payments - record a payment
+router.post('/:id/payments', requirePermission('invoices'), wrap((req, res) => {
+  const id = Number(req.params.id);
+  const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
+  if (!invoice) throw new AppError('Invoice not found.', 404);
+  if (invoice.status === 'CANCELLED') throw new AppError('Cannot record payment on a cancelled invoice.', 409);
+  const amount = num(req.body.amount);
+  if (amount <= 0) throw new AppError('Payment amount must be greater than zero.', 422);
+  const paymentDate = str(req.body.payment_date) || new Date().toISOString().slice(0, 10);
+  const paymentMode = str(req.body.payment_mode, 'CASH');
+  const note = str(req.body.note);
+
+  const out = tx(() => {
+    db.prepare(`INSERT INTO invoice_payments (invoice_id, amount, payment_date, payment_mode, note, created_by)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(id, amount, paymentDate, paymentMode, note, req.user.id);
+    return refreshPaymentTotals(id);
+  });
+
+  res.status(201).json(out);
+}));
+
+// DELETE /api/invoices/:id/payments/:paymentId - remove a payment record
+router.delete('/:id/payments/:paymentId', requirePermission('invoices'), wrap((req, res) => {
+  const invoiceId = Number(req.params.id);
+  const paymentId = Number(req.params.paymentId);
+  const payment = db.prepare('SELECT * FROM invoice_payments WHERE id = ? AND invoice_id = ?').get(paymentId, invoiceId);
+  if (!payment) throw new AppError('Payment record not found.', 404);
+
+  const out = tx(() => {
+    db.prepare('DELETE FROM invoice_payments WHERE id = ?').run(paymentId);
+    return refreshPaymentTotals(invoiceId);
+  });
+
+  res.json(out);
 }));
 
 module.exports = { router, loadInvoice, issueInvoice };

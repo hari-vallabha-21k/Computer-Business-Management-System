@@ -23,9 +23,11 @@
       headers['content-type'] = 'application/json';
       payload = JSON.stringify(body);
     }
+    const fetchOpts = { method, headers, body: payload };
+    if (options.cache) fetchOpts.cache = options.cache;
     let res;
     try {
-      res = await fetch(path, { method, headers, body: payload });
+      res = await fetch(path, fetchOpts);
     } catch (err) {
       throw new ApiError('Could not reach the server. Check your connection and try again.', 0);
     }
@@ -93,7 +95,7 @@
 
     /** Open an authenticated download (PDF / CSV) in a new tab-free blob link. */
     async download(path, params, filename) {
-      const res = await request('GET', path + qs(params), undefined, { raw: true });
+      const res = await request('GET', path + qs(params), undefined, { raw: true, cache: 'no-store' });
       if (!res.ok) throw new ApiError('The file could not be generated.', res.status);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -107,7 +109,7 @@
     },
 
     async openPdf(path) {
-      const res = await request('GET', path, undefined, { raw: true });
+      const res = await request('GET', path, undefined, { raw: true, cache: 'no-store' });
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');

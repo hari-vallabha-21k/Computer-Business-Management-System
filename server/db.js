@@ -239,6 +239,18 @@ CREATE TABLE IF NOT EXISTS counters (
   name TEXT PRIMARY KEY,
   value INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS invoice_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  amount REAL NOT NULL,
+  payment_date TEXT NOT NULL DEFAULT (date('now')),
+  payment_mode TEXT NOT NULL DEFAULT 'CASH',
+  note TEXT DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_payments_invoice ON invoice_payments(invoice_id);
 `;
 
 db.exec(SCHEMA);
@@ -287,6 +299,7 @@ const MIGRATIONS = [
   ['purchases', 'flagged_items', 'INTEGER NOT NULL DEFAULT 0'],
   ['purchases', 'checked_at', 'TEXT'],
   ['purchases', 'checked_by', 'INTEGER REFERENCES users(id)'],
+  ['invoices', 'amount_paid', 'REAL NOT NULL DEFAULT 0'],
 ];
 for (const [table, column, definition] of MIGRATIONS) ensureColumn(table, column, definition);
 
