@@ -175,6 +175,8 @@
 
   /** The page title block. One primary action, everything else a link. */
   function pageHead({ eyebrow, title, sub, actions, back }) {
+    // Accept a bare href as well as { href, label }.
+    if (typeof back === 'string') back = { href: back, label: 'Back' };
     return `
       ${back ? `<a class="back-link" href="${back.href}">← ${esc(back.label)}</a>` : ''}
       <div class="page-head">
