@@ -69,7 +69,7 @@ server/
   routes/             products, hsn, inventory, purchases, invoices, returns,
                       parties (customers/suppliers), analytics, reports, misc
 public/
-  index.html, css/, js/api.js, js/ui.js, js/charts.js, js/pages/*
+  index.html, css/, js/api.js, js/ui.js, js/pages/*
 scripts/seed.js       Demo data
 samples/              Example supplier invoices to try the scan flow with
 tests/                Business-rule tests (node:test)

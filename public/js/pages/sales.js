@@ -1,61 +1,74 @@
-/* Sales: create invoice, invoice history, invoice view (PDF/QR/print) and returns. */
+/* Sales: create an invoice, the invoice itself, history and returns. */
 (function () {
   'use strict';
   const {
-    esc, money, qty, date, dateTime, table, loading, statusTag, toast, errorToast, modal, confirm,
-    productSearch, partySearch, formValues, todayIso,
+    esc, money, rupees, plural, qty, date, dateTime, table, loading, skeleton, statusTag, toast, errorToast,
+    modal, confirm, productSearch, partySearch, todayIso, rupeesInWords, pageHead, wireLinks,
+    moreMenu, wireMenus,
   } = window.ui;
 
-  const tabs = (active) => `
-    <div class="tabs">
-      <a href="#/sales/create" class="${active === 'create' ? 'active' : ''}">Create Invoice</a>
-      <a href="#/sales" class="${active === 'history' ? 'active' : ''}">Invoice History</a>
-      <a href="#/sales/returns" class="${active === 'returns' ? 'active' : ''}">Returns</a>
-    </div>`;
+  const SEARCH_ICON = `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A4843"
+    stroke-width="1.8" stroke-linecap="round"><path d="M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-4.3-4.3"/></svg>`;
 
-  // ---------- Create invoice ----------
   async function create(view, invoiceId) {
     view.innerHTML = `
-      <div class="page-head"><div><h1>${invoiceId ? 'Edit Draft Invoice' : 'Create Invoice'}</h1>
-        <p class="muted">Pick a customer, search products, and the rest fills itself in.</p></div></div>
-      ${tabs('create')}
-      <div class="grid cols-2">
-        <div class="card">
-          <div class="card-head"><h2>Customer</h2></div>
-          <div id="customer-pick"></div>
-          <div id="customer-info" class="alert info hidden"></div>
-          <div class="form-grid" style="margin-top:10px">
-            <label>Invoice Date<input name="invoice_date" type="date" value="${todayIso()}"></label>
-            <label>Payment Mode<select name="payment_mode">
-              <option>CASH</option><option>UPI</option><option>CARD</option><option>BANK TRANSFER</option><option>CREDIT</option>
-            </select></label>
-            <label>Payment Status<select name="payment_status"><option>PAID</option><option>UNPAID</option><option>PARTIAL</option></select></label>
-            <label>Terms<input name="payment_terms" list="terms-list" placeholder="Due on Receipt">
-              <datalist id="terms-list"><option>Due on Receipt</option><option>Net 15</option><option>Net 30</option><option>Net 45</option></datalist></label>
-            <label>Due Date<input name="due_date" type="date"></label>
-            <label class="full">Ship To (leave blank to use the customer address)
-              <input name="ship_to_address" placeholder="Delivery address"></label>
-            <label class="full">Notes<input name="notes"></label>
+      ${pageHead({
+    title: invoiceId ? 'Edit Draft Invoice' : 'New Invoice',
+    sub: 'Choose the customer and products. Prices, HSN and GST fill in by themselves.',
+    actions: `<span class="muted" id="invoice-meta">${date(todayIso())}</span>`,
+  })}
+      <div style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start">
+        <div style="flex:2 1 480px;min-width:0;display:flex;flex-direction:column;gap:20px">
+          <section class="card" style="margin:0">
+            <div class="pad">
+              <div id="customer-pick"></div>
+              <div id="customer-info" class="autofill" style="margin-top:12px" hidden></div>
+            </div>
+          </section>
+
+          <section class="card" style="margin:0">
+            <div class="pad">
+              <div id="product-pick"></div>
+            </div>
+            <div id="lines" class="pad" style="padding-top:0"></div>
+          </section>
+
+          <section class="card" style="margin:0">
+            <div class="card-head"><h2>Invoice details</h2></div>
+            <div class="pad">
+              <div class="form-grid">
+                <label>Invoice date<input name="invoice_date" type="date" value="${todayIso()}"></label>
+                <label>Payment<select name="payment_mode">
+                  <option>CASH</option><option>UPI</option><option>CARD</option>
+                  <option>BANK TRANSFER</option><option>CREDIT</option>
+                </select></label>
+                <label>Payment status<select name="payment_status">
+                  <option>PAID</option><option>UNPAID</option><option>PARTIAL</option></select></label>
+                <label>Terms<input name="payment_terms" list="terms-list" placeholder="Due on Receipt">
+                  <datalist id="terms-list"><option>Due on Receipt</option><option>Net 15</option>
+                    <option>Net 30</option><option>Net 45</option></datalist></label>
+                <label>Due date<input name="due_date" type="date"></label>
+                <label class="full">Ship to <span class="opt">(leave blank to use the customer's address)</span>
+                  <input name="ship_to_address" placeholder="Delivery address"></label>
+                <label class="full">Product brief <span class="opt">(printed under the items)</span>
+                  <textarea name="product_brief" rows="2"></textarea></label>
+                <label class="full">Notes <span class="opt">(optional)</span><input name="notes"></label>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="card summary" style="flex:1 1 300px;min-width:280px;margin:0">
+          <div class="card-head"><h2>Summary</h2></div>
+          <div class="pad">
+            <div id="totals"></div>
+            <div class="hint" id="price-mode" style="margin-bottom:12px"></div>
+            <div id="stock-note"></div>
+            <button class="btn primary block tall" id="issue">Issue Invoice</button>
+            <p class="hint center">Issuing reduces stock straight away.</p>
+            <div class="center"><button class="link-btn" id="save-draft">Save as draft</button></div>
           </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>Add Products</h2></div>
-          <div id="product-pick"></div>
-          <div id="totals" style="margin-top:16px"></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>Invoice Items</h2>
-          <span class="muted small" id="price-mode"></span>
-          <span class="muted small" id="stock-note"></span></div>
-        <div id="lines"></div>
-        <label style="margin-top:12px">Product Brief (specifications and serial numbers printed under the items)
-          <textarea name="product_brief" rows="2"></textarea></label>
-      </div>
-      <div class="btn-row">
-        <button class="btn" id="save-draft">Save as Draft</button>
-        <button class="btn primary" id="issue">Issue Invoice</button>
-        <span class="muted small">A draft does not change stock. Issuing the invoice reduces inventory.</span>
+        </aside>
       </div>`;
 
     const state = { customer: null, lines: [], invoiceId: invoiceId || null };
@@ -63,12 +76,27 @@
     partySearch(view.querySelector('#customer-pick'), 'customers', (c) => {
       state.customer = c;
       const box = view.querySelector('#customer-info');
-      box.className = 'alert info';
-      box.innerHTML = `<strong>${esc(c.name)}</strong> · ${esc(c.phone || 'no phone')}${c.gstin ? ` · GSTIN ${esc(c.gstin)}` : ''}
-        · ${c.transactions || 0} previous invoice(s)`;
-    });
+      box.hidden = false;
+      box.innerHTML = `
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+          <div>
+            <div style="font-weight:600">${esc(c.name)}</div>
+            <div class="small muted">${esc(c.phone || 'No phone')}${c.gstin ? ` · GSTIN ${esc(c.gstin)}` : ''}
+              · ${plural(c.transactions || 0, 'previous invoice')}</div>
+          </div>
+          <button class="link-btn" id="clear-customer">Change</button>
+        </div>`;
+      box.querySelector('#clear-customer').addEventListener('click', () => {
+        state.customer = null;
+        box.hidden = true;
+        view.querySelector('#customer-pick input').value = '';
+        renderTotals();
+      });
+      renderTotals();
+    }, { label: 'Customer' });
 
-    productSearch(view.querySelector('#product-pick'), (product) => addLine(product), { label: 'Search product' });
+    productSearch(view.querySelector('#product-pick'), (product) => addLine(product),
+      { label: 'Add product', placeholder: 'Search product, model or scan a barcode…' });
 
     function addLine(product) {
       const existing = state.lines.find((l) => l.product.id === product.id);
@@ -95,44 +123,62 @@
     function renderLines() {
       const host = view.querySelector('#lines');
       if (!state.lines.length) {
-        host.innerHTML = '<div class="empty">No items yet. Search for a product above to start.</div>';
-      } else {
-        host.innerHTML = table(state.lines, [
-          {
-            key: 'product',
-            label: 'Product',
-            render: (l) => `<strong>${esc(l.product.name)}</strong>
-              <div class="small muted">${esc(l.product.product_code)} · HSN ${esc(l.product.hsn_code || '-')} · GST ${l.product.gst_rate}%
-              · in stock ${qty(l.product.stock)}</div>
-              ${l.qty > l.product.stock ? `<div class="small error">⚠ Only ${qty(l.product.stock)} in stock</div>` : ''}`,
-          },
-          { key: 'qty', label: 'Qty', num: true, render: (l, i) => `<input type="number" min="1" step="1" style="width:74px" data-field="qty" data-i="${i}" value="${l.qty}">` },
-          { key: 'unitPrice', label: 'Rate', num: true, render: (l, i) => `<input type="number" step="0.01" style="width:104px" data-field="unitPrice" data-i="${i}" value="${l.unitPrice}">` },
-          { key: 'discount', label: 'Discount', num: true, render: (l, i) => `<input type="number" step="0.01" style="width:96px" data-field="discount" data-i="${i}" value="${l.discount}">` },
-          { key: 'gst', label: 'GST', num: true, render: (l) => money(lineTotals(l).gst) },
-          { key: 'total', label: 'Amount', num: true, render: (l) => `<strong>${money(lineTotals(l).total)}</strong>` },
-          {
-            key: 'serials',
-            label: 'Serials',
-            render: (l, i) => (l.product.serial_tracked
-              ? `<button class="btn small" data-serials="${i}">${l.serials.length ? `${l.serials.length} selected` : 'Select'}</button>`
-              : '<span class="muted small">-</span>'),
-          },
-          { key: 'remove', label: '', render: (l, i) => `<button class="btn small ghost" data-remove="${i}">✕</button>` },
-        ]);
-
-        host.querySelectorAll('[data-field]').forEach((input) => input.addEventListener('change', () => {
-          const line = state.lines[Number(input.dataset.i)];
-          line[input.dataset.field] = Number(input.value) || 0;
-          setTimeout(renderLines, 0);
-        }));
-        host.querySelectorAll('[data-remove]').forEach((btn) => btn.addEventListener('click', () => {
-          state.lines.splice(Number(btn.dataset.remove), 1);
-          renderLines();
-        }));
-        host.querySelectorAll('[data-serials]').forEach((btn) => btn.addEventListener('click',
-          () => pickSerials(Number(btn.dataset.serials))));
+        host.innerHTML = '<div class="empty" style="padding:28px 8px"><h3>No products yet</h3>'
+          + '<p>Search above to add the first item.</p></div>';
+        renderTotals();
+        return;
       }
+
+      host.innerHTML = `<div class="line-list">${state.lines.map((l, i) => {
+    const totals = lineTotals(l);
+    const short = l.qty > l.product.stock;
+    return `<div class="line-item">
+          <div class="top">
+            <div class="grow">
+              <div class="name">${esc(l.product.name)}</div>
+              <div class="meta">HSN ${esc(l.product.hsn_code || '—')} · GST ${l.product.gst_rate}%
+                · ${qty(l.product.stock)} in stock</div>
+            </div>
+            <div class="stepper-input">
+              <button type="button" data-step="-1" data-i="${i}" aria-label="Decrease">−</button>
+              <input type="number" min="1" step="1" data-field="qty" data-i="${i}" value="${l.qty}">
+              <button type="button" data-step="1" data-i="${i}" aria-label="Increase">+</button>
+            </div>
+            <div class="amount">${money(totals.total)}
+              <div class="meta">${money(l.unitPrice)} each</div></div>
+            <button type="button" class="link-btn quiet" data-remove="${i}">Remove</button>
+          </div>
+          ${short ? `<div class="field-error">Only ${plural(l.product.stock, 'unit')} available.</div>` : ''}
+          <div class="form-grid" style="margin-top:12px">
+            <label class="small">Rate<input type="number" step="0.01" data-field="unitPrice" data-i="${i}" value="${l.unitPrice}"></label>
+            ${window.api.can('discount')
+    ? `<label class="small">Discount<input type="number" step="0.01" data-field="discount" data-i="${i}" value="${l.discount}"></label>`
+    : ''}
+          </div>
+          ${l.product.serial_tracked ? `<div style="margin-top:10px">
+            <button type="button" class="link-btn" data-serials="${i}">
+              ${l.serials.length ? `${plural(l.serials.length, 'serial number')} chosen` : 'Choose serial numbers'}</button>
+            ${l.serials.length ? `<div class="small muted">${esc(l.serials.join(', '))}</div>` : ''}
+          </div>` : ''}
+        </div>`;
+  }).join('')}</div>`;
+
+      host.querySelectorAll('[data-field]').forEach((input) => input.addEventListener('change', () => {
+        const line = state.lines[Number(input.dataset.i)];
+        line[input.dataset.field] = Number(input.value) || 0;
+        setTimeout(renderLines, 0);
+      }));
+      host.querySelectorAll('[data-step]').forEach((btn) => btn.addEventListener('click', () => {
+        const line = state.lines[Number(btn.dataset.i)];
+        line.qty = Math.max(1, line.qty + Number(btn.dataset.step));
+        renderLines();
+      }));
+      host.querySelectorAll('[data-remove]').forEach((btn) => btn.addEventListener('click', () => {
+        state.lines.splice(Number(btn.dataset.remove), 1);
+        renderLines();
+      }));
+      host.querySelectorAll('[data-serials]').forEach((btn) => btn.addEventListener('click',
+        () => pickSerials(Number(btn.dataset.serials))));
       renderTotals();
     }
 
@@ -188,28 +234,31 @@
         acc.total += t.total;
         return acc;
       }, { subtotal: 0, discount: 0, gst: 0, total: 0 });
-      const interState = state.customer && state.customer.gstin && window.api.state.business
-        && window.api.state.business.gstin
-        && state.customer.gstin.slice(0, 2) !== window.api.state.business.gstin.slice(0, 2);
+
+      const business = window.api.state.business;
+      const interState = state.customer && state.customer.gstin && business && business.gstin
+        && state.customer.gstin.slice(0, 2) !== business.gstin.slice(0, 2);
+      const units = state.lines.reduce((sum, l) => sum + l.qty, 0);
+
       view.querySelector('#totals').innerHTML = `
-        <table>
-          <tr><th>Taxable Value</th><td class="num">${money(totals.subtotal)}</td></tr>
-          ${totals.discount ? `<tr><th>Discount</th><td class="num">− ${money(totals.discount)}</td></tr>` : ''}
-          ${interState
-        ? `<tr><th>IGST</th><td class="num">${money(totals.gst)}</td></tr>`
-        : `<tr><th>CGST</th><td class="num">${money(totals.gst / 2)}</td></tr>
-             <tr><th>SGST</th><td class="num">${money(totals.gst / 2)}</td></tr>`}
-          <tr><th>Total</th><td class="num"><strong style="font-size:17px">${money(totals.total)}</strong></td></tr>
-        </table>`;
-      const modeNote = view.querySelector('#price-mode');
-      if (modeNote) {
-        modeNote.textContent = inclusive()
-          ? 'Rates include GST - tax is backed out of the price.'
-          : 'Rates exclude GST - tax is added on top.';
-      }
+        <div class="line"><span class="muted">Subtotal · ${plural(units, 'item')}</span>
+          <span class="num">${money(totals.subtotal)}</span></div>
+        ${totals.discount ? `<div class="line"><span class="muted">Discount</span>
+          <span class="num">− ${money(totals.discount)}</span></div>` : ''}
+        ${interState
+    ? `<div class="line"><span class="muted">IGST</span><span class="num">${money(totals.gst)}</span></div>`
+    : `<div class="line"><span class="muted">CGST</span><span class="num">${money(totals.gst / 2)}</span></div>
+       <div class="line"><span class="muted">SGST</span><span class="num">${money(totals.gst / 2)}</span></div>`}
+        <div class="total"><span>Total</span><span class="value">${rupees(totals.total)}</span></div>`;
+
+      view.querySelector('#price-mode').textContent = inclusive()
+        ? 'Rates include GST — the tax is backed out of the price.'
+        : 'Rates exclude GST — the tax is added on top.';
+
       const short = state.lines.filter((l) => l.qty > l.product.stock);
       view.querySelector('#stock-note').innerHTML = short.length
-        ? `<span class="error">⚠ ${short.length} line(s) exceed available stock</span>` : '';
+        ? `<div class="alert error" style="margin-bottom:12px"><span class="glyph">!</span>
+             <div>${plural(short.length, 'line')} more than you have in stock.</div></div>` : '';
     }
 
     const payload = (status) => ({
@@ -290,38 +339,83 @@
   // ---------- Invoice history ----------
   async function history(view) {
     view.innerHTML = `
-      <div class="page-head"><div><h1>Invoices</h1><p class="muted">Drafts hold no stock; issued invoices have already reduced it.</p></div>
-        <div class="actions"><a class="btn primary" href="#/sales/create">+ New Invoice</a></div></div>
-      ${tabs('history')}
-      <div class="card"><div class="filters">
-        <label class="grow">Search<input type="search" id="q" placeholder="Invoice no, customer or phone"></label>
-        <label>Status<select id="status"><option value="">All</option><option>DRAFT</option><option>ISSUED</option><option>CANCELLED</option></select></label>
-        <label>From<input type="date" id="from"></label>
-        <label>To<input type="date" id="to"></label>
-      </div></div>
-      <div class="card" id="list">${loading()}</div>`;
+      ${pageHead({
+    title: 'Invoice History',
+    sub: "All invoices you've issued. Click one to view, print or share.",
+    actions: '<a class="btn primary" href="#/sales/create">+ Create Invoice</a>',
+  })}
+      <div class="filters">
+        <div class="search">${SEARCH_ICON}
+          <input type="search" id="q" placeholder="Search invoice number or customer…" autocomplete="off"></div>
+        <select id="period" aria-label="Date">
+          <option value="month">This month</option>
+          <option value="today">Today</option>
+          <option value="last30">Last 30 days</option>
+          <option value="all">Everything</option>
+        </select>
+        <select id="status" aria-label="Status">
+          <option value="">All statuses</option>
+          <option value="ISSUED">Issued</option>
+          <option value="DRAFT">Draft</option>
+          <option value="CANCELLED">Cancelled</option>
+        </select>
+      </div>
+      <div class="card" id="list">${skeleton(8)}</div>`;
 
     const load = async () => {
+      const { from, to } = window.ui.range(view.querySelector('#period').value);
       const { invoices } = await window.api.get('/api/invoices', {
         q: view.querySelector('#q').value.trim(),
         status: view.querySelector('#status').value,
-        from: view.querySelector('#from').value,
-        to: view.querySelector('#to').value,
-        limit: 200,
+        from, to, limit: 200,
       });
-      view.querySelector('#list').innerHTML = table(invoices, [
-        { key: 'invoice_no', label: 'Invoice No', render: (r) => `<a href="#/sales/invoice/${r.id}"><strong>${esc(r.invoice_no)}</strong></a>` },
-        { key: 'invoice_date', label: 'Date', render: (r) => date(r.invoice_date) },
-        { key: 'customer_name', label: 'Customer', render: (r) => `${esc(r.customer_name || 'Walk-in')}<div class="small muted">${esc(r.customer_phone || '')}</div>` },
-        { key: 'status', label: 'Status', render: (r) => statusTag(r.status) },
-        { key: 'payment_mode', label: 'Payment', render: (r) => `${esc(r.payment_mode || '-')} <span class="small muted">${esc(r.payment_status || '')}</span>` },
-        { key: 'total', label: 'Total', num: true, render: (r) => money(r.total) },
-      ], { empty: 'No invoices yet.' });
+      const list = view.querySelector('#list');
+      list.innerHTML = invoices.length ? table(invoices, [
+        { label: 'Invoice', class: 'doc', render: (r) => esc(r.invoice_no) },
+        {
+          label: 'Customer',
+          render: (r) => `${esc(r.customer_name || 'Walk-in')}${r.customer_phone
+    ? `<div class="sub">${esc(r.customer_phone)}</div>` : ''}`,
+        },
+        { label: 'Date', render: (r) => `<span class="muted nowrap">${date(r.invoice_date)}</span>` },
+        { label: 'Amount', num: true, render: (r) => rupees(r.total) },
+        { label: 'Status', noLabel: true, render: (r) => statusTag(r.status) },
+        {
+          label: '', noLabel: true,
+          render: () => moreMenu([
+            { label: 'View', action: 'view' },
+            { label: 'Print', action: 'print' },
+            { label: 'Download PDF', action: 'pdf' },
+            { label: 'Share on WhatsApp', action: 'share' },
+          ], '⋮'),
+        },
+      ], { rowAttrs: (r) => `data-id="${r.id}" data-no="${esc(r.invoice_no)}" data-total="${r.total}" data-href="#/sales/invoice/${r.id}"` })
+        : `<div class="empty"><h3>No invoices found</h3>
+            <p>Try the invoice number (e.g. ${esc(window.api.state.business ? `${window.api.state.business.invoice_prefix}-1024` : 'INV-1024')})
+            or the customer's phone.</p>
+            <a class="btn primary" href="#/sales/create">Create Invoice</a></div>`;
+
+      wireLinks(list);
+      wireMenus(list, {
+        view: (row) => { window.location.hash = `#/sales/invoice/${row.dataset.id}`; },
+        print: (row) => { window.location.hash = `#/sales/invoice/${row.dataset.id}`; setTimeout(() => window.print(), 900); },
+        pdf: (row) => window.api.download(`/api/invoices/${row.dataset.id}/pdf`, {}, `${row.dataset.no}.pdf`),
+        share: (row) => shareOnWhatsApp(row.dataset.no, Number(row.dataset.total)),
+      });
     };
+
     let timer;
-    view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 200); });
-    ['#status', '#from', '#to'].forEach((s) => view.querySelector(s).addEventListener('change', load));
+    view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 220); });
+    ['#status', '#period'].forEach((sel) => view.querySelector(sel).addEventListener('change', load));
     await load();
+  }
+
+  /** Open WhatsApp with the invoice summary ready to send. */
+  function shareOnWhatsApp(invoiceNo, total, phone) {
+    const business = window.api.state.business || {};
+    const text = `${business.name || 'Invoice'}\nInvoice ${invoiceNo}\nTotal: ${rupees(total)}\nThank you for your business.`;
+    const url = `https://wa.me/${phone ? String(phone).replace(/\D/g, '') : ''}?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank', 'noopener');
   }
 
   // ---------- Invoice view ----------
@@ -341,21 +435,26 @@
     ].filter(Boolean);
 
     view.innerHTML = `
-      <div class="page-head">
-        <div><h1>${esc(inv.invoice_no)} ${statusTag(inv.status)}</h1>
-          <p class="muted">${date(inv.invoice_date)} · ${esc(inv.customer_name || 'Walk-in customer')}
-            ${inv.issued_at ? `· issued ${dateTime(inv.issued_at)}` : ''}</p></div>
-        <div class="actions">
-          ${inv.status === 'DRAFT' ? `<button class="btn success" id="issue">Issue Invoice</button>
-            <a class="btn" href="#/sales/create/${inv.id}">Edit</a>` : ''}
-          <button class="btn" id="pdf">Download PDF</button>
-          <button class="btn" id="print">Print</button>
-          ${inv.status !== 'CANCELLED' ? '<button class="btn danger" id="cancel">Cancel Invoice</button>' : ''}
-        </div>
-      </div>
+      ${pageHead({
+    title: `${esc(inv.invoice_no)} ${statusTag(inv.status)}`,
+    sub: `${esc(inv.customer_name || 'Walk-in customer')} · ${date(inv.invoice_date)} · Paid by ${esc(inv.payment_mode || '—')}`,
+    back: { href: '#/sales', label: 'Invoice History' },
+    actions: `
+      ${inv.status === 'DRAFT' ? '<button class="btn primary" id="issue">Issue Invoice</button>' : '<button class="btn primary" id="print">Print</button>'}
+      ${moreMenu([
+    ...(inv.status === 'DRAFT' ? [{ label: 'Edit draft', action: 'edit' }, { label: 'Print', action: 'print' }] : []),
+    { label: 'Download PDF', action: 'pdf' },
+    { label: 'Share on WhatsApp', action: 'share' },
+    ...(inv.status === 'ISSUED' ? [{ label: 'Return items', action: 'return' }] : []),
+    ...(inv.status !== 'CANCELLED' && window.api.can('cancel')
+    ? [{ sep: true }, { label: 'Cancel invoice', action: 'cancel', danger: true }] : []),
+  ])}`,
+  })}
 
-      ${inv.status === 'DRAFT' ? '<div class="alert warn">This is a draft. Inventory has not been reduced yet.</div>' : ''}
-      ${inv.status === 'CANCELLED' ? `<div class="alert error">Cancelled${inv.cancel_reason ? `: ${esc(inv.cancel_reason)}` : ''}. Stock was restored.</div>` : ''}
+      ${inv.status === 'DRAFT' ? `<div class="alert warn"><span class="glyph">!</span>
+        <div><strong>This is a draft.</strong> Nothing has left your stock yet — issue it when the sale is done.</div></div>` : ''}
+      ${inv.status === 'CANCELLED' ? `<div class="alert error"><span class="glyph">!</span>
+        <div><strong>Cancelled${inv.cancel_reason ? `: ${esc(inv.cancel_reason)}` : ''}.</strong> The stock went back on the shelf.</div></div>` : ''}
 
       <div class="invoice-sheet">
         <div class="inv-box inv-seller">
@@ -472,9 +571,20 @@
           <div class="small muted">${esc(business.declaration)}</div></div>` : ''}
       </div>`;
 
-    view.querySelector('#pdf').addEventListener('click',
+    const pdfBtn = view.querySelector('#pdf');
+    if (pdfBtn) pdfBtn.addEventListener('click',
       () => window.api.download(`/api/invoices/${id}/pdf`, {}, `${inv.invoice_no.replace(/\//g, '-')}.pdf`).catch(errorToast));
-    view.querySelector('#print').addEventListener('click', () => window.print());
+    const printBtn = view.querySelector('#print');
+    if (printBtn) printBtn.addEventListener('click', () => window.print());
+
+    const wireInvoiceMenu = () => wireMenus(view, {
+      edit: () => { window.location.hash = `#/sales/create/${inv.id}`; },
+      print: () => window.print(),
+      pdf: () => window.api.download(`/api/invoices/${inv.id}/pdf`, {}, `${inv.invoice_no}.pdf`),
+      share: () => shareOnWhatsApp(inv.invoice_no, inv.total, inv.customer_phone),
+      return: () => { window.location.hash = '#/sales/returns/new'; },
+      cancel: () => askCancel(),
+    });
 
     const issueBtn = view.querySelector('#issue');
     if (issueBtn) {
@@ -487,99 +597,154 @@
       });
     }
 
-    const cancelBtn = view.querySelector('#cancel');
-    if (cancelBtn) {
-      cancelBtn.addEventListener('click', async () => {
-        const reason = await modal({
-          title: `Cancel ${inv.invoice_no}?`,
-          confirmLabel: 'Cancel Invoice',
-          cancelLabel: 'Keep it',
-          body: `<p>${inv.status === 'ISSUED'
-            ? 'The stock sold on this invoice will be returned to inventory and any serial numbers released.'
-            : 'This draft will be marked cancelled.'}</p>
-            <label>Reason<input name="reason" placeholder="Why is this being cancelled?"></label>`,
-          onConfirm: (root) => root.querySelector('[name=reason]').value.trim() || 'Cancelled',
-        });
-        if (!reason) return;
-        try {
-          await window.api.post(`/api/invoices/${id}/cancel`, { reason });
-          toast('Invoice cancelled and stock restored.', 'success');
-          invoice(view, id);
-        } catch (err) { errorToast(err); }
+    const askCancel = async () => {
+      const reason = await modal({
+        title: `Cancel invoice ${inv.invoice_no}?`,
+        confirmLabel: 'Cancel Invoice',
+        cancelLabel: 'Keep Invoice',
+        danger: true,
+        body: `<p>${inv.status === 'ISSUED'
+          ? 'The items will go back into stock and any serial numbers are released. The invoice stays in your history marked as Cancelled.'
+          : 'This draft will be marked cancelled.'}</p>
+          <label>Reason<input name="reason" placeholder="Why is this being cancelled?"></label>`,
+        onConfirm: (root) => root.querySelector('[name=reason]').value.trim() || 'Cancelled',
       });
-    }
+      if (!reason) return;
+      try {
+        await window.api.post(`/api/invoices/${id}/cancel`, { reason });
+        toast('Invoice cancelled and the stock is back on the shelf.');
+        invoice(view, id);
+      } catch (err) { errorToast(err); }
+    };
+
+    wireInvoiceMenu();
   }
 
 
   // ---------- Returns ----------
   async function returns(view) {
     view.innerHTML = `
-      <div class="page-head"><div><h1>Returns</h1><p class="muted">Search the invoice, pick what came back, and stock goes up again.</p></div></div>
-      ${tabs('returns')}
-      <div class="card">
-        <div class="filters">
-          <label class="grow">Invoice number<input id="invoice-no" placeholder="INV-1024" list="recent-invoices">
-            <datalist id="recent-invoices"></datalist></label>
-          <button class="btn primary" id="find">Find Invoice</button>
+      ${pageHead({
+    title: 'Returns',
+    sub: 'Items customers brought back. Returned stock goes back on the shelf.',
+    actions: '<a class="btn primary" href="#/sales/returns/new">+ New Return</a>',
+  })}
+      <div class="card" id="list">${skeleton(6)}</div>`;
+
+    const { returns: rows } = await window.api.get('/api/returns', { limit: 100 });
+    const list = view.querySelector('#list');
+    list.innerHTML = rows.length ? table(rows, [
+      { label: 'Return #', class: 'doc', render: (r) => esc(r.return_no) },
+      { label: 'Invoice', render: (r) => esc(r.invoice_no) },
+      { label: 'Customer', render: (r) => esc(r.customer_name || 'Walk-in') },
+      {
+        label: 'Product',
+        render: (r) => esc(r.items.map((i) => `${i.product_name} ×${qty(i.qty)}`).join(', ')),
+      },
+      { label: 'Reason', render: (r) => `<span class="muted">${esc(r.reason || '—')}</span>` },
+      { label: 'Value', num: true, render: (r) => rupees(r.total) },
+      {
+        label: 'Stock',
+        render: (r) => (r.restock ? '<span class="tag green">Back on shelf</span>' : '<span class="tag red">Written off</span>'),
+      },
+      { label: 'Date', render: (r) => `<span class="muted nowrap">${date(r.return_date)}</span>` },
+    ], { rowAttrs: (r) => `data-href="#/sales/invoice/${r.invoice_id}"` })
+      : `<div class="empty"><h3>No returns yet</h3>
+          <p>When a customer brings something back, record it here and the stock goes up again.</p>
+          <a class="btn primary" href="#/sales/returns/new">+ New Return</a></div>`;
+    wireLinks(list);
+  }
+
+  /** New return: find the invoice, choose what came back, confirm. */
+  async function newReturn(view) {
+    view.innerHTML = `
+      <div style="max-width:820px">
+        ${pageHead({
+    title: 'New Return',
+    sub: 'Find the original invoice, then say what is coming back.',
+    back: { href: '#/sales/returns', label: 'Returns' },
+  })}
+        <ol class="steps" id="steps"></ol>
+        <div class="card">
+          <div class="pad">
+            <label>Find the original invoice
+              <input id="invoice-no" placeholder="Invoice number, e.g. ${esc(window.api.state.business ? window.api.state.business.invoice_prefix : 'INV')}-1024"
+                list="recent-invoices" autocomplete="off">
+              <datalist id="recent-invoices"></datalist>
+            </label>
+            <div class="btn-row" style="margin-top:12px">
+              <button class="btn primary" id="find">Find Invoice</button>
+            </div>
+            <div id="found"></div>
+          </div>
         </div>
-        <div id="found"></div>
-      </div>
-      <div class="card"><div class="card-head"><h2>Recent Returns</h2></div><div id="recent">${loading()}</div></div>`;
+      </div>`;
+
+    const setStep = (current) => {
+      view.querySelector('#steps').innerHTML = [
+        'Find the invoice', 'Choose what came back', 'Confirm',
+      ].map((label, i) => `<li class="${i < current ? 'done' : ''} ${i === current ? 'now' : ''}">
+          <span class="mark">${i < current ? '✓' : i + 1}</span>${label}</li>`).join('');
+    };
+    setStep(0);
 
     window.api.get('/api/invoices', { status: 'ISSUED', limit: 30 }).then(({ invoices }) => {
       view.querySelector('#recent-invoices').innerHTML = invoices
         .map((i) => `<option value="${esc(i.invoice_no)}">${esc(i.customer_name || 'Walk-in')} · ${money(i.total)}</option>`).join('');
     });
 
-    const loadRecent = async () => {
-      const { returns: rows } = await window.api.get('/api/returns', { limit: 30 });
-      view.querySelector('#recent').innerHTML = table(rows, [
-        { key: 'return_no', label: 'Return No' },
-        { key: 'return_date', label: 'Date', render: (r) => date(r.return_date) },
-        { key: 'invoice_no', label: 'Invoice', render: (r) => `<a href="#/sales/invoice/${r.invoice_id}">${esc(r.invoice_no)}</a>` },
-        { key: 'customer_name', label: 'Customer', render: (r) => esc(r.customer_name || 'Walk-in') },
-        { key: 'items', label: 'Items', render: (r) => esc(r.items.map((i) => `${i.product_name} ×${qty(i.qty)}`).join(', ')) },
-        { key: 'total', label: 'Value', num: true, render: (r) => money(r.total) },
-        { key: 'restock', label: 'Restocked', render: (r) => (r.restock ? '<span class="tag green">Yes</span>' : '<span class="tag red">Written off</span>') },
-      ], { empty: 'No returns recorded yet.' });
-    };
-
     view.querySelector('#find').addEventListener('click', async () => {
       const no = view.querySelector('#invoice-no').value.trim();
       const host = view.querySelector('#found');
       if (!no) { toast('Enter an invoice number.', 'error'); return; }
-      host.innerHTML = loading('Looking up the invoice…');
+      host.innerHTML = skeleton(3);
       try {
         const { invoice: inv, items, customer } = await window.api.get(`/api/returns/invoice/${encodeURIComponent(no)}`);
         const returnable = items.filter((i) => i.returnable > 0);
+        setStep(1);
         host.innerHTML = `
-          <div class="alert info" style="margin-top:12px">
-            <strong>${esc(inv.invoice_no)}</strong> · ${date(inv.invoice_date)} · ${esc(customer ? customer.name : 'Walk-in')} · ${money(inv.total)}
+          <div class="autofill" style="margin-top:16px">
+            <div class="head">✓ Invoice found</div>
+            <div class="facts"><span><b>${esc(inv.invoice_no)}</b></span><span>${date(inv.invoice_date)}</span>
+              <span>${esc(customer ? customer.name : 'Walk-in')}</span><span>${money(inv.total)}</span></div>
           </div>
-          ${returnable.length ? '' : '<div class="alert warn">Every line on this invoice has already been returned.</div>'}
-          <div id="return-lines"></div>
-          <div class="form-grid" style="margin-top:10px">
-            <label class="full">Reason<input name="reason" placeholder="Why is it coming back?"></label>
-            <label class="check"><input type="checkbox" name="restock" checked> Put the goods back into sellable stock</label>
+          ${returnable.length ? '' : `<div class="alert warn" style="margin-top:16px"><span class="glyph">!</span>
+            <div>Every line on this invoice has already been returned.</div></div>`}
+          <div id="return-lines" style="margin-top:16px"></div>
+          <div class="form-grid" style="margin-top:16px">
+            <label class="full">Return reason
+              <select name="reason">
+                <option>Not working / defective</option><option>Wrong product</option>
+                <option>Customer changed mind</option><option>Warranty replacement</option><option>Other</option>
+              </select></label>
+            <label class="check boxed full"><input type="checkbox" name="restock" checked>
+              <span>Put the goods back into sellable stock
+                <span class="hint">Leave this off for anything damaged — it is written off instead.</span></span></label>
           </div>
-          <div class="btn-row" style="margin-top:12px">
-            <button class="btn success" id="confirm-return" ${returnable.length ? '' : 'disabled'}>Confirm Return</button>
+          <div class="btn-row end" style="margin-top:16px">
+            <a class="link-btn quiet" href="#/sales/returns">Cancel</a>
+            <button class="btn primary" id="confirm-return" ${returnable.length ? '' : 'disabled'}>Record Return</button>
           </div>`;
 
-        const selections = new Map();
         host.querySelector('#return-lines').innerHTML = table(returnable, [
-          { key: 'product_name', label: 'Product', render: (r) => `${esc(r.product_name)}<div class="small muted">Sold ${qty(r.qty)}, already returned ${qty(r.returned_qty)}</div>` },
-          { key: 'returnable', label: 'Can return', num: true, render: (r) => qty(r.returnable) },
-          { key: 'qty', label: 'Return qty', num: true, render: (r) => `<input type="number" min="0" max="${r.returnable}" step="1" value="0" style="width:84px" data-item="${r.id}">` },
           {
-            key: 'serials',
+            label: 'Product',
+            render: (r) => `${esc(r.product_name)}<div class="sub">Sold ${qty(r.qty)}, already returned ${qty(r.returned_qty)}</div>`,
+          },
+          { label: 'Can return', num: true, render: (r) => qty(r.returnable) },
+          {
+            label: 'Return qty',
+            num: true,
+            render: (r) => `<input type="number" min="0" max="${r.returnable}" step="1" value="0" style="width:90px" data-item="${r.id}">`,
+          },
+          {
             label: 'Serials',
             render: (r) => (r.serial_tracked && r.serials.length
               ? `<select multiple size="2" style="min-width:150px" data-serials="${r.id}">
-                  ${r.serials.map((s) => `<option value="${esc(s.serial)}">${esc(s.serial)}</option>`).join('')}</select>`
-              : '<span class="muted small">-</span>'),
+                  ${r.serials.map((x) => `<option value="${esc(x.serial)}">${esc(x.serial)}</option>`).join('')}</select>`
+              : '<span class="muted small">—</span>'),
           },
-        ]);
+        ], { clickable: false, stacked: false });
 
         host.querySelector('#confirm-return').addEventListener('click', async () => {
           const lines = [];
@@ -594,32 +759,51 @@
               });
             }
           });
-          if (!lines.length) { toast('Enter a return quantity for at least one item.', 'error'); return; }
+          if (!lines.length) { toast('Enter how many units are coming back.', 'error'); return; }
+
+          const restock = host.querySelector('[name=restock]').checked;
+          const reason = host.querySelector('[name=reason]').value;
+          const units = lines.reduce((sum, l) => sum + l.qty, 0);
+          const ok = await modal({
+            title: 'Record this return?',
+            confirmLabel: 'Record Return',
+            body: `<div class="summary-line"><span class="muted">Invoice</span><strong>${esc(inv.invoice_no)}</strong></div>
+              <div class="summary-line"><span class="muted">Units</span><strong>${qty(units)}</strong></div>
+              <div class="summary-line"><span class="muted">Reason</span><strong>${esc(reason)}</strong></div>
+              <p class="muted">${restock
+    ? `Stock will increase by ${qty(units)}.`
+    : 'The goods are written off — stock will not increase.'}</p>`,
+            onConfirm: () => true,
+          });
+          if (!ok) return;
+
           try {
             const res = await window.api.post('/api/returns', {
-              invoice_id: inv.id,
-              items: lines,
-              reason: host.querySelector('[name=reason]').value.trim(),
-              restock: host.querySelector('[name=restock]').checked,
+              invoice_id: inv.id, reason, restock, items: lines,
             });
-            toast(`Return ${res.returnNo} recorded (${money(res.total)}). Inventory updated.`, 'success');
-            host.innerHTML = '';
-            view.querySelector('#invoice-no').value = '';
-            loadRecent();
+            setStep(3);
+            view.innerHTML = `<div class="card done-panel">
+              <div class="glyph ok">✓</div>
+              <h2>Return ${esc(res.returnNo)} recorded</h2>
+              <p>${restock ? `${plural(units, 'unit')} went back on the shelf.` : 'The goods were written off.'}</p>
+              <div class="btn-row" style="justify-content:center">
+                <a href="#/sales/invoice/${inv.id}">View invoice</a>
+                <a href="#/sales/returns">Back to Returns</a>
+              </div>
+            </div>`;
           } catch (err) { errorToast(err); }
         });
       } catch (err) {
-        host.innerHTML = `<div class="alert error" style="margin-top:12px">${esc(err.message)}</div>`;
+        host.innerHTML = `<div class="alert error" style="margin-top:16px"><span class="glyph">!</span>
+          <div><strong>${esc(err.message)}</strong><br>Check the invoice number and try again.</div></div>`;
       }
     });
 
     view.querySelector('#invoice-no').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); view.querySelector('#find').click(); }
     });
-
-    await loadRecent();
   }
 
   window.Pages = window.Pages || {};
-  window.Pages.sales = { create, history, invoice, returns };
+  window.Pages.sales = { create, history, invoice, returns, newReturn };
 })();

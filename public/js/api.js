@@ -2,7 +2,10 @@
 (function () {
   'use strict';
 
-  const state = { token: localStorage.getItem('cbms_token') || null, user: null, business: null };
+  const state = {
+    token: localStorage.getItem('cbms_token') || null,
+    user: null, business: null, permissions: {},
+  };
 
   class ApiError extends Error {
     constructor(message, status, details) {
@@ -79,10 +82,14 @@
       const data = await request('GET', '/api/auth/me');
       state.user = data.user;
       state.business = data.business;
+      state.permissions = data.permissions || {};
       return data.user;
     },
 
-    isAdmin: () => state.user && state.user.role === 'ADMIN',
+    isAdmin: () => !!state.user && state.user.role === 'ADMIN',
+
+    /** What this user may do. The owner may do everything. */
+    can: (key) => (state.user && state.user.role === 'ADMIN') || state.permissions[key] === true,
 
     /** Open an authenticated download (PDF / CSV) in a new tab-free blob link. */
     async download(path, params, filename) {

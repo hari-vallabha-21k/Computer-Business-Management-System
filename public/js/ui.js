@@ -22,6 +22,12 @@
 
   const qty = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
+  /** Rupees without paise, the way the shop reads a headline number. */
+  const rupees = (n) => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
+
+  /** "1 product" / "3 products" — small courtesies the design insists on. */
+  const plural = (n, one, many) => `${qty(n)} ${Number(n) === 1 ? one : (many || `${one}s`)}`;
+
   const date = (value) => {
     if (!value) return '-';
     const d = new Date(String(value).length <= 10 ? `${value}T00:00:00` : value.replace(' ', 'T'));
@@ -55,10 +61,29 @@
   }
 
   const STATUS_CLASS = {
-    ISSUED: 'green', DRAFT: 'amber', CANCELLED: 'red', CONFIRMED: 'green',
-    AVAILABLE: 'green', SOLD: 'blue', RETURNED: 'amber', DAMAGED: 'red',
+    ISSUED: 'green', DRAFT: '', CANCELLED: 'red', CONFIRMED: 'green', NEEDS_REVIEW: 'amber',
+    AVAILABLE: 'green', SOLD: 'blue', RETURNED: 'blue', DAMAGED: 'red',
   };
-  const statusTag = (status) => `<span class="tag ${STATUS_CLASS[status] || ''}">${esc(status)}</span>`;
+  const STATUS_LABEL = {
+    ISSUED: 'Issued', DRAFT: 'Draft', CANCELLED: 'Cancelled', CONFIRMED: 'Received',
+    NEEDS_REVIEW: 'Needs review', AVAILABLE: 'Available', SOLD: 'Sold',
+    RETURNED: 'Returned', DAMAGED: 'Damaged',
+  };
+  const statusTag = (status) =>
+    `<span class="tag ${STATUS_CLASS[status] || ''}">${esc(STATUS_LABEL[status] || status)}</span>`;
+
+  /** In stock / Low stock / Out of stock, always text plus colour. */
+  function stockState(product) {
+    if (Number(product.stock) <= 0) return { label: 'Out of Stock', tone: 'red' };
+    if (Number(product.min_stock) > 0 && Number(product.stock) <= Number(product.min_stock)) {
+      return { label: 'Low Stock', tone: 'amber' };
+    }
+    return { label: 'In Stock', tone: 'green' };
+  }
+  const stockTag = (product) => {
+    const s = stockState(product);
+    return `<span class="tag ${s.tone}">${s.label}</span>`;
+  };
 
   const MOVEMENT_LABEL = {
     OPENING: 'Opening', PURCHASE: 'Purchase', SALE: 'Sale', RETURN: 'Return',
@@ -77,7 +102,7 @@
   const errorToast = (err) => toast(err && err.message ? err.message : 'Something went wrong.', 'error', 6000);
 
   /** Promise-based modal. resolve(null) on cancel. */
-  function modal({ title, body, confirmLabel = 'Confirm', cancelLabel = 'Cancel', onRender, onConfirm, wide }) {
+  function modal({ title, body, confirmLabel = 'Confirm', cancelLabel = 'Cancel', onRender, onConfirm, wide, danger }) {
     return new Promise((resolve) => {
       const root = document.getElementById('modal-root');
       const backdrop = document.createElement('div');
@@ -88,7 +113,7 @@
           <div class="body">${body}</div>
           <footer>
             <button class="btn" data-cancel>${esc(cancelLabel)}</button>
-            ${confirmLabel ? `<button class="btn primary" data-confirm>${esc(confirmLabel)}</button>` : ''}
+            ${confirmLabel ? `<button class="btn ${danger ? 'danger' : 'primary'}" data-confirm>${esc(confirmLabel)}</button>` : ''}
           </footer>
         </div>`;
       root.appendChild(backdrop);
@@ -109,22 +134,27 @@
     });
   }
 
-  const confirm = (title, message, confirmLabel = 'Confirm') =>
-    modal({ title, body: `<p>${esc(message)}</p>`, confirmLabel, onConfirm: () => true });
+  const confirm = (title, message, confirmLabel = 'Confirm', danger = false) =>
+    modal({ title, body: `<p>${esc(message)}</p>`, confirmLabel, danger, onConfirm: () => true });
 
   /** Build a table; columns: {key,label,class,render,num}. */
   function table(rows, columns, options = {}) {
     if (!rows.length) return `<div class="empty">${esc(options.empty || 'Nothing to show yet.')}</div>`;
     const head = columns.map((c) => `<th class="${c.num ? 'num' : ''} ${c.class || ''}">${esc(c.label)}</th>`).join('');
     const body = rows.map((row, i) => {
-      const cells = columns.map((c) => {
+      const cells = columns.map((c, ci) => {
         const value = c.render ? c.render(row, i) : esc(row[c.key]);
-        return `<td class="${c.num ? 'num' : ''} ${c.class || ''}">${value === undefined || value === null ? '' : value}</td>`;
+        const classes = [c.num ? 'num' : '', c.class || '', ci === 0 ? 'headline' : ''].filter(Boolean).join(' ');
+        const label = c.noLabel ? '' : esc(c.label);
+        return `<td class="${classes}" data-label="${label}">${value === undefined || value === null ? '' : value}</td>`;
       }).join('');
       const attrs = options.rowAttrs ? options.rowAttrs(row) : '';
-      return `<tr class="${options.onRowClick ? 'clickable' : ''}" ${attrs}>${cells}</tr>`;
+      return `<tr class="${options.clickable === false ? '' : 'clickable'}" ${attrs}>${cells}</tr>`;
     }).join('');
-    return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    // On a phone the same markup renders as cards, which is what the design asks for.
+    return `<div class="table-wrap"><table class="${options.stacked === false ? '' : 'stacked'}">
+      <thead><tr>${head}</tr></thead><tbody>${body}</tbody>
+      ${options.foot ? `<tfoot><tr>${options.foot}</tr></tfoot>` : ''}</table></div>`;
   }
 
   const kpi = ({ label, value, sub, delta, accent }) => `
@@ -136,7 +166,91 @@
       `<div class="sub delta ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}% vs previous</div>`}
     </div>`;
 
-  const loading = (text = 'Loading…') => `<div class="empty">${esc(text)}</div>`;
+  /** Skeleton rows: loading shows the shape of the answer, never a spinner. */
+  const skeleton = (rows = 6) => `<div class="card">${Array.from({ length: rows }, () => `
+    <div class="skeleton-row"><div style="flex:2"></div><div style="flex:1"></div><div style="flex:1"></div>
+    <div style="width:80px"></div></div>`).join('')}</div>`;
+
+  const loading = () => skeleton(6);
+
+  /** The page title block. One primary action, everything else a link. */
+  function pageHead({ eyebrow, title, sub, actions, back }) {
+    return `
+      ${back ? `<a class="back-link" href="${back.href}">← ${esc(back.label)}</a>` : ''}
+      <div class="page-head">
+        <div>
+          ${eyebrow ? `<div class="eyebrow">${esc(eyebrow)}</div>` : ''}
+          <div class="title-row"><h1>${title}</h1></div>
+          ${sub ? `<p>${sub}</p>` : ''}
+        </div>
+        ${actions ? `<div class="actions">${actions}</div>` : ''}
+      </div>`;
+  }
+
+  /** Hairline grid of numbers; each tile may link somewhere. */
+  const tiles = (list) => `<div class="tiles">${list.map((t) => `
+    <div class="kpi ${t.accent || ''} ${t.href ? 'clickable' : ''}" ${t.href ? `data-href="${t.href}"` : ''}>
+      <div class="label">${esc(t.label)}</div>
+      <div class="value">${t.value}</div>
+      ${t.note ? `<div class="sub">${t.note}</div>` : ''}
+      ${t.delta === undefined || t.delta === null ? ''
+    : `<div class="sub delta ${t.delta >= 0 ? 'up' : 'down'}">${t.delta >= 0 ? '▲' : '▼'} ${Math.abs(t.delta)}% vs previous</div>`}
+    </div>`).join('')}</div>`;
+
+  const emptyState = ({ title, text, action }) => `
+    <div class="card"><div class="empty">
+      <h3>${esc(title)}</h3>${text ? `<p>${text}</p>` : ''}${action || ''}
+    </div></div>`;
+
+  /**
+   * A "More ⋮" menu. `items` are {label, action, danger, sep}; the action name
+   * comes back through the data-action attribute for the page to handle.
+   */
+  const moreMenu = (items, label = 'More ⋮') => `
+    <div class="menu-wrap">
+      <button class="btn ${label === '⋮' ? 'ghost icon' : ''}" data-menu-toggle
+        aria-label="More actions">${label}</button>
+      <div class="menu" hidden>
+        ${items.map((i) => (i.sep ? '<div class="sep"></div>'
+    : `<button data-action="${i.action}" class="${i.danger ? 'danger' : ''}">${esc(i.label)}</button>`)).join('')}
+      </div>
+    </div>`;
+
+  /** Wire every menu inside `root`, calling handlers[action]() on a choice. */
+  function wireMenus(root, handlers) {
+    root.querySelectorAll('[data-menu-toggle]').forEach((button) => {
+      const menu = button.parentElement.querySelector('.menu');
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wasOpen = !menu.hidden;
+        root.querySelectorAll('.menu').forEach((m) => { m.hidden = true; });
+        menu.hidden = wasOpen;
+      });
+      menu.querySelectorAll('[data-action]').forEach((item) => item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.hidden = true;
+        const handler = handlers[item.dataset.action];
+        if (handler) handler(button.closest('[data-id]'));
+      }));
+    });
+    document.addEventListener('click', () => root.querySelectorAll('.menu').forEach((m) => { m.hidden = true; }));
+  }
+
+  /** Clickable rows: wire every element carrying data-href. */
+  function wireLinks(root) {
+    root.querySelectorAll('[data-href]').forEach((el) => el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-menu-toggle]') || e.target.closest('.menu') || e.target.closest('a')) return;
+      window.location.hash = el.dataset.href;
+    }));
+  }
+
+  /** Tab strip; calls onSelect(key) without re-rendering the whole page. */
+  function tabs(items, active) {
+    return `<div class="tabs">${items.map(([key, label]) =>
+    `<button data-tab="${esc(key)}" class="${key === active ? 'active' : ''}">${esc(label)}</button>`).join('')}</div>`;
+  }
+  const wireTabs = (root, onSelect) => root.querySelectorAll('[data-tab]')
+    .forEach((b) => b.addEventListener('click', () => onSelect(b.dataset.tab)));
 
   /**
    * Type-ahead product search box. Calls onSelect(product).
@@ -302,8 +416,10 @@
   }
 
   window.ui = {
-    esc, money, moneyShort, qty, date, dateTime, iso, todayIso, range, statusTag, MOVEMENT_LABEL,
-    inWords, rupeesInWords,
-    toast, errorToast, modal, confirm, table, kpi, loading, productSearch, partySearch, quickAddParty, formValues,
+    esc, money, moneyShort, rupees, plural, qty, date, dateTime, iso, todayIso, range, statusTag, stockTag, stockState,
+    MOVEMENT_LABEL, inWords, rupeesInWords,
+    toast, errorToast, modal, confirm, table, kpi, tiles, loading, skeleton, pageHead, emptyState,
+    moreMenu, wireMenus, wireLinks, tabs, wireTabs,
+    productSearch, partySearch, quickAddParty, formValues,
   };
 })();
