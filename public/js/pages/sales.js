@@ -7,6 +7,11 @@
     moreMenu, wireMenus,
   } = window.ui;
 
+  const PAYMENT_STATUS_CLASS = { PAID: 'green', PARTIAL: 'amber', UNPAID: 'red' };
+  const PAYMENT_STATUS_LABEL = { PAID: 'Paid', PARTIAL: 'Partial', UNPAID: 'Unpaid' };
+  const paymentTag = (status) =>
+    `<span class="tag ${PAYMENT_STATUS_CLASS[status] || ''}">${esc(PAYMENT_STATUS_LABEL[status] || status)}</span>`;
+
   const SEARCH_ICON = `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A4843"
     stroke-width="1.8" stroke-linecap="round"><path d="M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-4.3-4.3"/></svg>`;
 
@@ -42,8 +47,7 @@
                   <option>CASH</option><option>UPI</option><option>CARD</option>
                   <option>BANK TRANSFER</option><option>CREDIT</option>
                 </select></label>
-                <label>Payment status<select name="payment_status">
-                  <option>PAID</option><option>UNPAID</option><option>PARTIAL</option></select></label>
+                <label>Amount already paid<input type="number" name="amount_paid" step="0.01" min="0" placeholder="0.00"></label>
                 <label>Terms<input name="payment_terms" list="terms-list" placeholder="Due on Receipt">
                   <datalist id="terms-list"><option>Due on Receipt</option><option>Net 15</option>
                     <option>Net 30</option><option>Net 45</option></datalist></label>
@@ -266,7 +270,7 @@
       customer_id: state.customer ? state.customer.id : null,
       invoice_date: view.querySelector('[name=invoice_date]').value,
       payment_mode: view.querySelector('[name=payment_mode]').value,
-      payment_status: view.querySelector('[name=payment_status]').value,
+      amount_paid: Number(view.querySelector('[name=amount_paid]').value) || 0,
       payment_terms: view.querySelector('[name=payment_terms]').value,
       due_date: view.querySelector('[name=due_date]').value,
       ship_to_address: view.querySelector('[name=ship_to_address]').value,
@@ -359,14 +363,22 @@
           <option value="DRAFT">Draft</option>
           <option value="CANCELLED">Cancelled</option>
         </select>
+        <select id="pay-status" aria-label="Payment">
+          <option value="">All payments</option>
+          <option value="UNPAID">Unpaid</option>
+          <option value="PARTIAL">Partial</option>
+          <option value="PAID">Paid</option>
+        </select>
       </div>
       <div class="card" id="list">${skeleton(8)}</div>`;
 
     const load = async () => {
       const { from, to } = window.ui.range(view.querySelector('#period').value);
+      const payStatus = view.querySelector('#pay-status').value;
       const { invoices } = await window.api.get('/api/invoices', {
         q: view.querySelector('#q').value.trim(),
         status: view.querySelector('#status').value,
+        paymentStatus: payStatus,
         from, to, limit: 200,
       });
       const list = view.querySelector('#list');
@@ -379,6 +391,12 @@
         },
         { label: 'Date', render: (r) => `<span class="muted nowrap">${date(r.invoice_date)}</span>` },
         { label: 'Amount', num: true, render: (r) => rupees(r.total) },
+        { label: 'Payment', noLabel: true, render: (r) => paymentTag(r.payment_status || 'UNPAID') },
+        { label: 'Due', num: true, render: (r) => { 
+            if (r.payment_status === 'PAID') return '<span class="muted">—</span>';
+            const due = Math.max(0, r.total - (r.amount_paid || 0)); 
+            return due > 0 ? `<span style="color:var(--red-text)">${rupees(due)}</span>` : '<span class="muted">—</span>'; 
+        } },
         { label: 'Status', noLabel: true, render: (r) => statusTag(r.status) },
         {
           label: '', noLabel: true,
@@ -406,7 +424,7 @@
 
     let timer;
     view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 220); });
-    ['#status', '#period'].forEach((sel) => view.querySelector(sel).addEventListener('change', load));
+    ['#status', '#period', '#pay-status'].forEach((sel) => view.querySelector(sel).addEventListener('change', load));
     await load();
   }
 
@@ -569,7 +587,9 @@
           <div class="small muted">${esc(business.terms).replace(/\n/g, '<br>')}</div></div>` : ''}
         ${business.declaration ? `<div class="inv-section"><div class="inv-label">Declaration</div>
           <div class="small muted">${esc(business.declaration)}</div></div>` : ''}
-      </div>`;
+      </div>
+
+      ${inv.status !== 'CANCELLED' ? '<div class="payment-tracker no-print" id="payment-tracker"></div>' : ''}`;
 
     const pdfBtn = view.querySelector('#pdf');
     if (pdfBtn) pdfBtn.addEventListener('click',
@@ -618,6 +638,128 @@
     };
 
     wireInvoiceMenu();
+
+    // ---------- Payment tracker (website only, never in PDF/print) ----------
+    if (inv.status !== 'CANCELLED') {
+      renderPaymentTracker(view.querySelector('#payment-tracker'), inv, id);
+    }
+  }
+
+  /** Render the full payment tracker card with summary, form, and history. */
+  async function renderPaymentTracker(host, inv, invoiceId) {
+    if (!host) return;
+    try {
+      const data = await window.api.get(`/api/invoices/${invoiceId}/payments`);
+      const { payments, total, amountPaid, balance, paymentStatus } = data;
+      const pct = total > 0 ? Math.min(100, Math.round((amountPaid / total) * 100)) : 0;
+      const barClass = paymentStatus === 'PAID' ? 'bar-paid' : (paymentStatus === 'PARTIAL' ? 'bar-partial' : 'bar-unpaid');
+
+      host.innerHTML = `
+        <div class="card" style="margin:0">
+          <div class="card-head" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <h2 style="flex:1;min-width:0">Payment Tracker</h2>
+            ${paymentTag(paymentStatus)}
+          </div>
+          <div class="pad">
+            <div class="pay-summary">
+              <div class="pay-kpi">
+                <div class="pay-kpi-label">Invoice Total</div>
+                <div class="pay-kpi-value">${rupees(total)}</div>
+              </div>
+              <div class="pay-kpi">
+                <div class="pay-kpi-label">Amount Paid</div>
+                <div class="pay-kpi-value pay-green">${rupees(amountPaid)}</div>
+              </div>
+              <div class="pay-kpi">
+                <div class="pay-kpi-label">Balance Due</div>
+                <div class="pay-kpi-value ${balance > 0 ? 'pay-red' : ''}">${rupees(balance)}</div>
+              </div>
+            </div>
+
+            <div class="pay-progress">
+              <div class="pay-progress-bar ${barClass}" style="width:${pct}%"></div>
+            </div>
+            <div class="pay-progress-label">
+              <span class="muted small">${pct}% collected</span>
+              <span class="muted small">${money(amountPaid)} of ${money(total)}</span>
+            </div>
+
+            ${paymentStatus !== 'PAID' ? `
+              <div class="pay-form">
+                <div class="pay-form-title">Record a payment</div>
+                <div class="form-grid">
+                  <label>Amount<input type="number" name="pay_amount" step="0.01" min="0.01" 
+                    value="${balance > 0 ? balance.toFixed(2) : ''}" placeholder="0.00"></label>
+                  <label>Date<input type="date" name="pay_date" value="${todayIso()}"></label>
+                  <label>Mode<select name="pay_mode">
+                    <option>CASH</option><option>UPI</option><option>CARD</option>
+                    <option>BANK TRANSFER</option><option>CHEQUE</option></select></label>
+                  <label>Note <span class="opt">(optional)</span><input name="pay_note" placeholder="e.g. Advance payment"></label>
+                </div>
+                <div class="btn-row" style="margin-top:12px">
+                  <button class="btn primary" id="record-payment">Record Payment</button>
+                </div>
+              </div>` : `
+              <div class="alert success" style="margin-top:16px;margin-bottom:0">
+                <span class="glyph">✓</span>
+                <div><strong>Fully paid.</strong> All payments for this invoice have been collected.</div>
+              </div>`}
+          </div>
+
+          ${payments.length ? `
+            <div class="card-head" style="border-top:1px solid var(--border)">
+              <h2>Payment History</h2>
+            </div>
+            <div class="pay-history">
+              ${payments.map((p) => `
+                <div class="pay-row">
+                  <div class="pay-row-main">
+                    <div>
+                      <strong>${money(p.amount)}</strong>
+                      <span class="tag ${p.payment_mode === 'CASH' ? '' : 'blue'}" style="margin-left:8px;font-size:11px">${esc(p.payment_mode)}</span>
+                    </div>
+                    <div class="small muted">${date(p.payment_date)}${p.created_by_name ? ` · by ${esc(p.created_by_name)}` : ''}${p.note ? ` · ${esc(p.note)}` : ''}</div>
+                  </div>
+                  <button class="link-btn quiet small" data-delete-payment="${p.id}" title="Remove this payment">✕</button>
+                </div>`).join('')}
+            </div>` : ''}
+        </div>`;
+
+      // Wire record payment button
+      const recordBtn = host.querySelector('#record-payment');
+      if (recordBtn) {
+        recordBtn.addEventListener('click', async () => {
+          const amount = Number(host.querySelector('[name=pay_amount]').value);
+          const paymentDate = host.querySelector('[name=pay_date]').value;
+          const paymentMode = host.querySelector('[name=pay_mode]').value;
+          const note = host.querySelector('[name=pay_note]').value;
+          if (!amount || amount <= 0) { toast('Enter a valid payment amount.', 'error'); return; }
+          try {
+            await window.api.post(`/api/invoices/${invoiceId}/payments`, {
+              amount, payment_date: paymentDate, payment_mode: paymentMode, note,
+            });
+            toast('Payment recorded.', 'success');
+            renderPaymentTracker(host, inv, invoiceId);
+          } catch (err) { errorToast(err); }
+        });
+      }
+
+      // Wire delete buttons
+      host.querySelectorAll('[data-delete-payment]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const ok = await confirm('Remove payment?', 'This payment record will be deleted and the balance will be updated.');
+          if (!ok) return;
+          try {
+            await window.api.del(`/api/invoices/${invoiceId}/payments/${btn.dataset.deletePayment}`);
+            toast('Payment removed.', 'success');
+            renderPaymentTracker(host, inv, invoiceId);
+          } catch (err) { errorToast(err); }
+        });
+      });
+    } catch (err) {
+      host.innerHTML = `<div class="alert error"><span class="glyph">!</span>
+        <div><strong>Could not load payment data.</strong> ${esc(err.message)}</div></div>`;
+    }
   }
 
 

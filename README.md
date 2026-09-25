@@ -44,9 +44,28 @@ password-holder in **Settings → Users** before using this with real data.
 
 Requires Node.js 22.5 or newer (it uses the built-in `node:sqlite`).
 
+## Running the Project Locally
+
+To run the project on your machine without issues or having the terminal unexpectedly close:
+
+1. **Open a Terminal / Command Prompt:** Do not just double-click the JS files. Instead, open your terminal (Command Prompt, PowerShell, or VS Code terminal) and navigate to the project folder.
+2. **Install Dependencies:**
+   ```bash
+   npm install
+   ```
+3. **Start the Server:** Run the following command. (The `--no-warnings` flag is included in the package.json scripts to suppress the experimental SQLite warnings that can sometimes cause terminal environments to abort abruptly).
+   ```bash
+   npm run dev
+   ```
+   *Note: Using `npm run dev` starts an auto-restarting development server. You can also use `npm start` for a standard run.*
+
+4. **Open the App:** Once you see `Computer Business Management System running on http://localhost:3000`, open your web browser and go to [http://localhost:3000](http://localhost:3000).
+
+---
+
+### Running Tests
 ```bash
 npm test          # 53 tests: business rules, scanning, multi-invoice, invoice template, screens
-npm run dev       # auto-restarting dev server
 ```
 
 ## How it is built
