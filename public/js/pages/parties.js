@@ -88,7 +88,12 @@
     return async function render(view) {
       const c = COPY[kind];
       view.innerHTML = `
-        ${pageHead({ title: c.title, sub: c.sub, actions: `<button class="btn primary" id="add">${c.add}</button>` })}
+        ${pageHead({
+    title: c.title,
+    sub: c.sub,
+    actions: `<button class="link-btn" id="download-excel">↓ Download Excel</button>
+      <button class="btn primary" id="add">${c.add}</button>`,
+  })}
         <div class="filters" style="max-width:520px">
           <div class="search">${SEARCH_ICON}
             <input type="search" id="q" placeholder="${esc(c.search)}" autocomplete="off"></div>
@@ -121,6 +126,12 @@
 
       const add = async () => { if (await saveContact(kind)) load(); };
       view.querySelector('#add').addEventListener('click', add);
+      view.querySelector('#download-excel').addEventListener('click', async () => {
+        try {
+          await window.api.download(`/api/${kind}/export/excel`, {}, `${kind}.xlsx`);
+          toast(`${c.title} downloaded as a spreadsheet.`);
+        } catch (err) { errorToast(err); }
+      });
       let timer;
       view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 220); });
       await load();

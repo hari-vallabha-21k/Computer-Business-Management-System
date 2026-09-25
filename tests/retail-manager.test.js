@@ -208,6 +208,15 @@ test('an adjustment can be entered as a shelf count in plain words', async () =>
   assert.match(nonsense.body.error, /damaged/);
 });
 
+test('the contact list downloads as a spreadsheet', async () => {
+  const res = await fetch(url('/api/customers/export/excel'), { headers: { authorization: `Bearer ${tokens.admin}` } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /spreadsheetml/);
+  const text = workbookToText(Buffer.from(await res.arrayBuffer()));
+  assert.match(text, /Name \| Phone/);
+  assert.match(text, /Design Customer/);
+});
+
 test('the invoice numbering can be set to continue from a given number', async () => {
   const res = await api('PUT', '/api/settings', { next_invoice_no: 5000 }, 'admin');
   assert.equal(res.status, 200);

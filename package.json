@@ -5,7 +5,9 @@
   "description": "Web based business management system for a computer retailer: inventory, purchases, sales, invoicing, customers, suppliers and analytics.",
   "type": "commonjs",
   "main": "server/index.js",
-  "engines": { "node": ">=22.5.0" },
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "start": "node --no-warnings server/index.js",
     "dev": "node --no-warnings --watch server/index.js",
@@ -13,9 +15,10 @@
     "test": "node --no-warnings --test tests/*.test.js"
   },
   "dependencies": {
-    "express": "^5.1.0",
     "bcryptjs": "^3.0.2",
+    "express": "^5.1.0",
     "multer": "^2.0.2",
+    "pdf-parse": "^2.4.5",
     "pdfkit": "^0.17.2",
     "qrcode": "^1.5.4"
   }

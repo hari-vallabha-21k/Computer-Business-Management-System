@@ -52,12 +52,12 @@ router.get('/:id', wrap((req, res) => {
  * Files arrive under "file" or "files"; the response always carries `results`,
  * and a single upload is also spread at the top level.
  */
-router.post('/extract', upload.any(), wrap((req, res) => {
+router.post('/extract', upload.any(), wrap(async (req, res) => {
   const files = (req.files || []).filter((f) => ['file', 'files', 'files[]'].includes(f.fieldname));
   if (!files.length) throw new AppError('Please choose at least one invoice file to upload.', 422);
 
-  const results = files.map((file) => {
-    const result = extractPurchaseInvoice(file.buffer, file.originalname);
+  const results = await Promise.all(files.map(async (file) => {
+    const result = await extractPurchaseInvoice(file.buffer, file.originalname);
     result.fileName = file.originalname;
     if (!result.ok) {
       db.prepare(`INSERT INTO notifications (level, type, message, link)
@@ -72,7 +72,7 @@ router.post('/extract', upload.any(), wrap((req, res) => {
         .run(`${flagged} item(s) from "${file.originalname}" require verification.`);
     }
     return result;
-  });
+  }));
 
   const summary = {
     results,

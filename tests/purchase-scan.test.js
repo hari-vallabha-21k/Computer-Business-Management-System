@@ -37,7 +37,7 @@ test('extraction reads header, line items and matches existing products', async 
   await makeProduct({ name: 'Kingston Fury 16GB DDR4', brand: 'Kingston', hsn_code: '84733099', opening_stock: 0 });
 
   const { extractPurchaseInvoice } = require('../server/lib/extract');
-  const result = extractPurchaseInvoice(Buffer.from(INVOICE_TEXT), 'supplier-invoice.txt');
+  const result = await extractPurchaseInvoice(Buffer.from(INVOICE_TEXT), 'supplier-invoice.txt');
 
   assert.equal(result.ok, true);
   assert.equal(result.header.invoiceNo, 'PUR/24-25/1024');
@@ -68,10 +68,10 @@ test('the upload endpoint returns a review payload without changing stock', asyn
     'uploading an invoice must not create a purchase on its own');
 });
 
-test('a scanned image is reported as unreadable instead of failing silently', () => {
+test('a scanned image is reported as unreadable instead of failing silently', async () => {
   const { extractPurchaseInvoice } = require('../server/lib/extract');
-  const png = Buffer.from('89504e470d0a1a0a', 'hex');
-  const result = extractPurchaseInvoice(png, 'bill.png');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+  const result = await extractPurchaseInvoice(png, 'bill.png');
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'IMAGE_NO_TEXT_LAYER');
   assert.match(result.message, /enter the purchase manually/);
@@ -87,7 +87,7 @@ test('Rule 9: extraction alone changes nothing; confirming the purchase adds sto
     'Description | HSN | Qty | Rate',
     'Confirm Flow SSD | 84733099 | 4 | 5200',
   ].join('\n');
-  const extracted = extractPurchaseInvoice(Buffer.from(text), 'pd-9001.txt');
+  const extracted = await extractPurchaseInvoice(Buffer.from(text), 'pd-9001.txt');
   assert.equal(extracted.ok, true);
   assert.equal(stockOf(product.id), 2, 'extraction must not touch inventory');
 

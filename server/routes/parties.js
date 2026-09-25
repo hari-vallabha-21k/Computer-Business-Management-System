@@ -4,6 +4,7 @@ const { db } = require('../db');
 const { AppError, wrap, str, required } = require('../lib/util');
 const { requireRole } = require('../lib/auth');
 const { requirePermission } = require('../lib/permissions');
+const { tableToWorkbook } = require('../lib/xlsxwrite');
 
 /** Customers and suppliers share the same shape, so one factory builds both routers. */
 function partyRouter(table) {
@@ -29,6 +30,30 @@ function partyRouter(table) {
       return { ...r, transactions: stats.invoices, total_value: stats.value, last_transaction: last };
     });
     res.json({ [table]: enriched });
+  }));
+
+  /** The whole list as a spreadsheet, for the accountant or a mail merge. */
+  router.get('/export/excel', wrap((req, res) => {
+    const rows = db.prepare(`SELECT * FROM ${table} ORDER BY name`).all().map((r) => {
+      const stats = isCustomer
+        ? db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS value
+             FROM invoices WHERE customer_id = ? AND status = 'ISSUED'`).get(r.id)
+        : db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS value
+             FROM purchases WHERE supplier_id = ?`).get(r.id);
+      return { ...r, transactions: stats.n, total_value: stats.value };
+    });
+
+    const columns = [
+      { key: 'name', label: 'Name' }, { key: 'phone', label: 'Phone' }, { key: 'email', label: 'Email' },
+      { key: 'address', label: 'Address' }, { key: 'gstin', label: 'GSTIN' },
+      ...(isCustomer ? [{ key: 'shipping_address', label: 'Shipping Address' }] : []),
+      { key: 'transactions', label: isCustomer ? 'Invoices' : 'Purchases' },
+      { key: 'total_value', label: 'Total Value' },
+    ];
+
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.set('Content-Disposition', `attachment; filename="${table}.xlsx"`);
+    res.send(tableToWorkbook(rows, columns, isCustomer ? 'Customers' : 'Suppliers'));
   }));
 
   /**

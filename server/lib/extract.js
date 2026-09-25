@@ -9,6 +9,7 @@
  */
 const zlib = require('node:zlib');
 const path = require('node:path');
+const { PDFParse } = require('pdf-parse');
 const { db } = require('../db');
 const { round2, similarity, normalise } = require('./util');
 const { workbookToText } = require('./xlsx');
@@ -27,52 +28,20 @@ function fromHex(hex) {
   return out;
 }
 
-/** Pull readable text out of a PDF: inflate content streams and collect show-text operands. */
-function pdfText(buffer) {
-  const chunks = [];
-  const raw = buffer.toString('latin1');
-  const streamRe = /stream\r?\n?([\s\S]*?)endstream/g;
-  let m;
-  while ((m = streamRe.exec(raw)) !== null) {
-    const bytes = Buffer.from(m[1], 'latin1');
-    let content = null;
-    try {
-      content = zlib.inflateSync(bytes).toString('latin1');
-    } catch {
-      try { content = zlib.inflateRawSync(bytes).toString('latin1'); } catch { content = null; }
-    }
-    if (content === null) content = bytes.toString('latin1');
-    if (!/(Tj|TJ)/.test(content)) continue;
-
-    const lines = [];
-    // Show-text operators carry either literal (strings) or <hex> strings;
-    // both appear inside TJ arrays too. T* and ET end the current line.
-    const textRe = /\[((?:[^\]\\]|\\.)*)\]\s*TJ|\(((?:[^)\\]|\\.)*)\)\s*Tj|<([0-9A-Fa-f\s]*)>\s*Tj|T\*|ET/g;
-    let t;
-    let current = '';
-    while ((t = textRe.exec(content)) !== null) {
-      if (t[1] !== undefined) {
-        const parts = [...t[1].matchAll(/\(((?:[^)\\]|\\.)*)\)|<([0-9A-Fa-f\s]*)>/g)]
-          .map((p) => (p[1] !== undefined ? p[1] : fromHex(p[2])));
-        current += parts.join('');
-      } else if (t[2] !== undefined) {
-        current += t[2];
-      } else if (t[3] !== undefined) {
-        current += fromHex(t[3]);
-      } else {
-        if (current.trim()) lines.push(current);
-        current = '';
-      }
-    }
-    if (current.trim()) lines.push(current);
-    chunks.push(lines.join('\n'));
+/** Pull readable text out of a PDF using pdf-parse. */
+async function pdfText(buffer) {
+  try {
+    const standardFontDataUrl = path.join(require.resolve('pdfjs-dist'), '../../standard_fonts/');
+    const parser = new PDFParse(new Uint8Array(buffer), { standardFontDataUrl });
+    const data = await parser.getText();
+    return data.text || '';
+  } catch (err) {
+    console.error('pdfParse error:', err);
+    return '';
   }
-  return chunks.join('\n')
-    .replace(/\\(\d{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)))
-    .replace(/\\([()\\])/g, '$1');
 }
 
-function readText(buffer, filename) {
+async function readText(buffer, filename) {
   const ext = path.extname(filename || '').toLowerCase();
   if (IMAGE_EXT.has(ext)) return { text: '', reason: 'IMAGE_NO_TEXT_LAYER' };
   if (TEXT_EXT.has(ext)) return { text: buffer.toString('utf8'), reason: null };
@@ -85,7 +54,7 @@ function readText(buffer, filename) {
     }
   }
   if (ext === '.pdf' || buffer.subarray(0, 4).toString() === '%PDF') {
-    const text = pdfText(buffer);
+    const text = await pdfText(buffer);
     return { text, reason: text.trim() ? null : 'PDF_NO_TEXT_LAYER' };
   }
   const text = buffer.toString('utf8');
@@ -170,7 +139,7 @@ function findItems(text) {
     }
   }
 
-  const rowRe = new RegExp(`^(.+?)\\s+(\\d{4,8})?\\s*(\\d+(?:\\.\\d+)?)\\s+${MONEY}(?:\\s+${MONEY})?$`);
+  const rowRe = new RegExp(`^(.+?)\\s+(\\d{4,8})?\\s*(\\d+(?:\\.\\d+)?)\\s+${MONEY}(?:\\s+\\d{1,2}(?:\\.\\d+)?%)?(?:\\s+${MONEY})?$`);
   for (const line of lines) {
     if (/^(total|sub\s*total|grand|gst|cgst|sgst|igst|amount in words|discount|round)/i.test(line)) continue;
     const m = line.match(rowRe);
@@ -214,8 +183,8 @@ function matchSupplier(name, gstin) {
 }
 
 /** Full extraction: returns a review payload and never touches inventory. */
-function extractPurchaseInvoice(buffer, filename) {
-  const { text, reason } = readText(buffer, filename);
+async function extractPurchaseInvoice(buffer, filename) {
+  const { text, reason } = await readText(buffer, filename);
   const warnings = [];
   if (!text.trim()) {
     return {
