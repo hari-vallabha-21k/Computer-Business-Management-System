@@ -61,7 +61,7 @@ function daysAgo(n) {
 
 function seed() {
   reset();
-  const admin = createUser({ name: 'Business Owner', email: 'owner@example.com', password: 'owner123', role: 'ADMIN' });
+  const admin = createUser({ name: 'Rajesh', email: 'owner@example.com', password: 'owner123', role: 'ADMIN' });
   createUser({ name: 'Sales Staff', email: 'staff@example.com', password: 'staff123', role: 'STAFF' });
 
   db.prepare(`UPDATE business_settings SET name = ?, address = ?, phone = ?, email = ?, gstin = ?,

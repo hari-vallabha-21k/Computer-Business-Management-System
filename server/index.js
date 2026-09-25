@@ -81,7 +81,7 @@ function ensureFirstAdmin() {
   if (count) return null;
   const email = process.env.ADMIN_EMAIL || 'owner@example.com';
   const password = process.env.ADMIN_PASSWORD || 'owner123';
-  createUser({ name: 'Business Owner', email, password, role: 'ADMIN' });
+  createUser({ name: 'Rajesh', email, password, role: 'ADMIN' });
   return { email, password };
 }
 

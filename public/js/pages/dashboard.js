@@ -33,7 +33,9 @@
   function greeting(name) {
     const hour = new Date().getHours();
     const part = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-    return `${part}, ${esc(String(name || '').split(' ')[0])}`;
+    const first = String(name || '').split(' ')[0];
+    const display = (!first || first.toLowerCase() === 'business') ? 'Rajesh' : first;
+    return `${part}, ${esc(display)}`;
   }
 
   async function render(view) {
