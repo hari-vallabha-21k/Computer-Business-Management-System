@@ -1296,7 +1296,9 @@
             const customer = '"' + (r.customer_name || 'Walk-in').replace(/"/g, '""') + '"';
             const cgst = (r.gst_amount / 2).toFixed(2);
             const sgst = (r.gst_amount / 2).toFixed(2);
-            csv += `${r.invoice_no},"${date(r.invoice_date)}",${customer},${r.taxable_value.toFixed(2)},${cgst},${sgst},${r.gst_amount.toFixed(2)},${r.total.toFixed(2)}\n`;
+            const d = new Date(r.invoice_date);
+            const shortDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            csv += `${r.invoice_no},${shortDate},${customer},${r.taxable_value.toFixed(2)},${cgst},${sgst},${r.gst_amount.toFixed(2)},${r.total.toFixed(2)}\n`;
           });
           const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
           const url = URL.createObjectURL(blob);

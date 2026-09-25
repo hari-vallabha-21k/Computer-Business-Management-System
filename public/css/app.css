@@ -107,30 +107,32 @@ a:hover { color: var(--primary-dark); text-decoration: underline; }
 .brand .kind { font-size: 12px; color: rgba(245, 244, 240, .62); margin-top: 5px; letter-spacing: .04em; }
 
 nav { flex: 1; overflow-y: auto; padding: 8px 10px 12px; }
-nav a {
+nav a, .sidebar-footer a {
   display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; margin-top: 6px;
   border-radius: var(--control-radius); color: rgba(245, 244, 240, .86); font-size: 15px; font-weight: 500;
+  text-decoration: none;
 }
-nav a svg { flex: none; opacity: .85; }
-nav a:hover { background: rgba(245, 244, 240, .08); color: #fff; text-decoration: none; }
-nav a.active { background: rgba(245, 244, 240, .14); color: #fff; font-weight: 600; }
+nav a svg, .sidebar-footer a svg { flex: none; opacity: .85; }
+nav a:hover, .sidebar-footer a:hover { background: rgba(245, 244, 240, .08); color: #fff; text-decoration: none; }
+nav a.active, .sidebar-footer a.active { background: rgba(245, 244, 240, .14); color: #fff; font-weight: 600; }
 nav a.sub { height: 36px; margin-top: 0; padding: 0 12px 0 42px; font-size: 14px; color: rgba(245, 244, 240, .74); }
 nav a .pill {
   margin-left: auto; min-width: 22px; height: 20px; padding: 0 6px; border-radius: 10px;
   background: var(--amber-bg); color: var(--amber); font-size: 12px; font-weight: 600;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.sidebar-footer { border-top: 1px solid rgba(245, 244, 240, .1); padding: 10px; }
-.user-chip { display: flex; align-items: center; gap: 10px; padding: 10px 8px 4px; }
+.sidebar-footer { border-top: 1px solid rgba(245, 244, 240, .1); padding: 8px 10px 12px; }
+.user-chip { display: flex; align-items: center; gap: 12px; padding: 8px 12px; margin-top: 6px; border-radius: var(--control-radius); }
+.user-chip:hover { background: rgba(245, 244, 240, .05); }
 .user-chip .avatar {
-  width: 34px; height: 34px; flex: none; border-radius: 50%; background: rgba(245, 244, 240, .14);
-  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;
+  width: 32px; height: 32px; flex: none; border-radius: 50%; background: rgba(245, 244, 240, .14);
+  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #fff;
 }
 .user-chip .who { flex: 1; min-width: 0; }
-.user-chip .who b { display: block; font-size: 14px; font-weight: 500; }
-.user-chip .who span { display: block; font-size: 12px; color: rgba(245, 244, 240, .62); }
-.sidebar-footer button.link { background: none; border: 0; color: rgba(245, 244, 240, .75); font: inherit; font-size: 13px; cursor: pointer; padding: 6px; }
-.sidebar-footer button.link:hover { color: #fff; text-decoration: underline; }
+.user-chip .who b { display: block; font-size: 14px; font-weight: 500; color: rgba(245, 244, 240, .9); }
+.user-chip .who span { display: block; font-size: 11.5px; color: rgba(245, 244, 240, .5); margin-top: 2px; }
+.sidebar-footer button.link { background: none; border: 0; color: rgba(245, 244, 240, .5); font: inherit; font-size: 13px; cursor: pointer; padding: 6px; }
+.sidebar-footer button.link:hover { color: #fff; opacity: 1 !important; }
 .scrim { position: fixed; inset: 0; background: rgba(10, 10, 10, .45); z-index: 40; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }

@@ -102,7 +102,7 @@
   const errorToast = (err) => toast(err && err.message ? err.message : 'Something went wrong.', 'error', 6000);
 
   /** Promise-based modal. resolve(null) on cancel. */
-  function modal({ title, body, confirmLabel = 'Confirm', cancelLabel = 'Cancel', onRender, onConfirm, wide, danger }) {
+  function modal({ title, body, confirmLabel = 'Confirm', cancelLabel = 'Cancel', deleteLabel, onRender, onConfirm, onDelete, wide, danger }) {
     return new Promise((resolve) => {
       const root = document.getElementById('modal-root');
       const backdrop = document.createElement('div');
@@ -112,6 +112,7 @@
           <header><h2>${esc(title)}</h2></header>
           <div class="body">${body}</div>
           <footer>
+            ${deleteLabel ? `<button class="btn danger" data-delete style="margin-right:auto">${esc(deleteLabel)}</button>` : ''}
             <button class="btn" data-cancel>${esc(cancelLabel)}</button>
             ${confirmLabel ? `<button class="btn ${danger ? 'danger' : 'primary'}" data-confirm>${esc(confirmLabel)}</button>` : ''}
           </footer>
@@ -126,6 +127,15 @@
         confirmBtn.addEventListener('click', async () => {
           try {
             const value = onConfirm ? await onConfirm(backdrop, close) : true;
+            if (value !== undefined) close(value);
+          } catch (err) { errorToast(err); }
+        });
+      }
+      const delBtn = backdrop.querySelector('[data-delete]');
+      if (delBtn) {
+        delBtn.addEventListener('click', async () => {
+          try {
+            const value = onDelete ? await onDelete(backdrop, close) : true;
             if (value !== undefined) close(value);
           } catch (err) { errorToast(err); }
         });

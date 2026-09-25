@@ -25,7 +25,9 @@ auth.post('/logout', wrap((req, res) => {
 
 auth.get('/me', wrap((req, res) => {
   if (!req.user) throw new AppError('Not signed in.', 401);
-  res.json({ user: req.user, business: settings(), permissions: permissions.staffPermissions() });
+  const user = db.prepare('SELECT id, name, email, role, active FROM users WHERE id = ?').get(req.user.id);
+  if (!user || !user.active) throw new AppError('Account disabled or missing.', 401);
+  res.json({ user, business: settings(), permissions: permissions.staffPermissions() });
 }));
 
 const users = express.Router();
@@ -67,6 +69,18 @@ users.put('/:id', requireRole('ADMIN'), wrap((req, res) => {
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(req.body.password), id);
   }
   res.json({ user: db.prepare('SELECT id, name, email, phone, role, active FROM users WHERE id = ?').get(id) });
+}));
+
+users.delete('/:id', requireRole('ADMIN'), wrap((req, res) => {
+  const id = Number(req.params.id);
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  if (!user) throw new AppError('User not found.', 404);
+  if (user.role === 'ADMIN') {
+    const admins = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'ADMIN'").get().n;
+    if (admins <= 1) throw new AppError('The last admin cannot be deleted.', 409);
+  }
+  db.prepare('DELETE FROM users WHERE id = ?').run(id);
+  res.json({ ok: true });
 }));
 
 const settingsRouter = express.Router();

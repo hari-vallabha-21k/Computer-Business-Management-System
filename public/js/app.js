@@ -328,11 +328,13 @@
 
   function applyBusiness(business) {
     if (!business) return;
-    const initial = (business.name || 'R').trim().charAt(0).toUpperCase();
+    const imgHtml = `<img src="/logo.png" style="width:100%;height:100%;object-fit:contain;border-radius:inherit">`;
     document.getElementById('brand-name').textContent = business.name;
-    document.getElementById('brand-mark').textContent = initial;
+    document.getElementById('brand-mark').style.background = 'transparent';
+    document.getElementById('brand-mark').innerHTML = imgHtml;
     document.getElementById('login-brand-name').textContent = business.name;
-    document.getElementById('login-mark').textContent = initial;
+    document.getElementById('login-mark').style.background = 'transparent';
+    document.getElementById('login-mark').innerHTML = imgHtml;
     document.title = `${business.name} · Retail Manager`;
     document.documentElement.dataset.textSize = business.text_size || 'normal';
   }
@@ -344,7 +346,9 @@
     document.getElementById('user-chip').innerHTML = `
       <div class="avatar">${esc(initials)}</div>
       <div class="who"><b>${esc(user.name)}</b><span>${user.role === 'ADMIN' ? 'Owner · Admin' : 'Sales Staff'}</span></div>
-      <button class="link" id="logout">Sign out</button>`;
+      <button class="link" id="logout" title="Sign out" style="padding:8px; border-radius:50%; opacity:0.7; transition:0.2s">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>`;
     document.getElementById('logout').addEventListener('click', async () => {
       await window.api.logout();
       window.location.hash = '#/';

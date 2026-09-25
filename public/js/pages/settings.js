@@ -305,6 +305,7 @@
           const saved = await modal({
             title: `Edit ${user.name}`,
             confirmLabel: 'Save',
+            deleteLabel: window.api.state.user.id !== user.id ? 'Delete user' : undefined,
             body: `
               <label>Name<input name="name" value="${esc(user.name)}"></label>
               <label>Phone <span class="opt">(optional)</span><input name="phone" value="${esc(user.phone || '')}"></label>
@@ -317,6 +318,11 @@
               <label class="check"><input type="checkbox" name="active" ${user.active ? 'checked' : ''}>
                 <span>Can sign in</span></label>`,
             onConfirm: (root) => window.api.put(`/api/users/${user.id}`, formValues(root)),
+            onDelete: async () => {
+              if (!await window.ui.confirm(`Delete ${user.name}?`, `Are you sure you want to completely remove ${user.name}?`)) return undefined;
+              await window.api.del(`/api/users/${user.id}`);
+              return true;
+            },
           });
           if (saved) { toast('User updated.'); renderSection(); }
         }));
