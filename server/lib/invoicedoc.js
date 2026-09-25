@@ -26,14 +26,17 @@ const MUTED = '#475569';
  * Official GST e-invoice (IRN) QR is a separate integration and is not produced here.
  */
 function qrPayload(invoice, business, baseUrl = '') {
-  const mode = (business.qr_mode || 'INVOICE_INFO').toUpperCase();
+  let mode = (business.qr_mode || 'INVOICE_INFO').toUpperCase();
+  if (business.upi_id && mode === 'INVOICE_INFO') mode = 'PAYMENT_UPI';
+
   if (mode === 'PAYMENT_UPI') {
     if (!business.upi_id) return { mode, data: '', note: 'No UPI ID configured in Settings.' };
     const params = new URLSearchParams({
-      pa: business.upi_id, pn: business.name, am: Number(invoice.total).toFixed(2),
+      pa: business.upi_id, pn: business.name || 'Business', am: Number(invoice.total).toFixed(2),
       cu: business.currency || 'INR', tn: `Invoice ${invoice.invoice_no}`,
     });
-    return { mode, data: `upi://pay?${params.toString()}` };
+    const queryString = params.toString().replace(/\+/g, '%20');
+    return { mode, data: `upi://pay?${queryString}` };
   }
   if (mode === 'VERIFY_URL') return { mode, data: `${baseUrl}/#/sales/invoice/${invoice.id}` };
   return {
@@ -56,9 +59,9 @@ async function qrDataUrl(invoice, business, baseUrl) {
 function columns(left, width, interState) {
   const spec = interState
     ? [['#', 22, 'center'], ['Item & Description', 180, 'left'], ['HSN', 50, 'center'], ['Qty', 30, 'center'],
-      ['Rate', 50, 'center'], ['Total\nIncl', 60, 'center'], ['Taxable\nAmount', 60, 'center'], ['18% IGST\nAmount', 75, 'center']]
+      ['Rate', 50, 'center'], ['Total Incl\nGST', 60, 'center'], ['Taxable\nAmount', 60, 'center'], ['18% IGST\nAmount', 75, 'center']]
     : [['#', 22, 'center'], ['Item & Description', 170, 'left'], ['HSN', 50, 'center'], ['Qty', 25, 'center'],
-      ['Rate', 45, 'center'], ['Total\nIncl', 55, 'center'], ['Taxable\nAmount', 55, 'center'],
+      ['Rate', 45, 'center'], ['Total Incl\nGST', 55, 'center'], ['Taxable\nAmount', 55, 'center'],
       ['9% CGST\nAmount', 50, 'center'], ['9% SGST\nAmount', 55, 'center']];
   
   const fixed = spec.reduce((s, c) => s + c[1], 0);
@@ -82,248 +85,243 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   const right = 565;
   const width = right - left;
   const interState = invoice.igst > 0;
-  const gstRate = items.length ? Number(items[0].gst_rate) : 18;
-  const halfRate = round2(gstRate / 2);
-
+  
   const LINE = '#000000';
   const INK = '#000000';
 
   const box = (x, y, w, h) => doc.rect(x, y, w, h).lineWidth(0.5).strokeColor(LINE).stroke();
   const text = (value, x, y, opts = {}) => doc.text(value === null || value === undefined ? '' : String(value), x, y, opts);
+  const hLine = (yPos, startX = left, w = width) => doc.moveTo(startX, yPos).lineTo(startX + w, yPos).lineWidth(0.5).strokeColor(LINE).stroke();
+  const vLine = (xPos, startY, h) => doc.moveTo(xPos, startY).lineTo(xPos, startY + h).lineWidth(0.5).strokeColor(LINE).stroke();
+
+  let y = left;
 
   // ---- Seller header ----
-  let y = left;
-  box(left, y, width, 60);
+  const headerH = 75;
+  box(left, y, width, headerH);
   
-  // Try loading logo
   const logoPath = path.join(__dirname, '../../public/img/logo.png');
-  let hasLogo = false;
   if (fs.existsSync(logoPath)) {
     try {
-      // Place logo at top right
-      doc.image(logoPath, right - 60, y + 5, { fit: [50, 50], align: 'right', valign: 'top' });
-      hasLogo = true;
+      doc.image(logoPath, left + 5, y + 5, { fit: [65, 65], align: 'left', valign: 'top' });
     } catch(e) {}
   }
+  
+  vLine(left + 75, y, headerH);
 
   doc.font('Times-Bold').fontSize(14).fillColor(INK);
-  text(business.name || 'Tax Invoice', left, y + 5, { width, align: 'center' });
+  text(business.name || 'THIRUMALA COMPUTER SERVICES', left + 75, y + 5, { width: width - 75, align: 'center' });
+  
   doc.font('Times-Roman').fontSize(10);
-  if (business.address) text(business.address, left, doc.y + 2, { width, align: 'center' });
+  if (business.address) text(business.address, left + 75, doc.y + 2, { width: width - 75, align: 'center' });
   if (business.gstin) {
     doc.font('Times-Bold').fontSize(11);
-    text(`GSTIN ${business.gstin}`, left, doc.y + 2, { width, align: 'center' });
+    text(`GSTIN ${business.gstin}`, left + 75, doc.y + 2, { width: width - 75, align: 'center' });
   }
 
-  y += 60;
+  hLine(y + 60, left + 75, width - 75);
+  doc.font('Times-Roman').fontSize(14);
+  text('TAX INVOICE', left, y + 62, { width: width - 5, align: 'right' });
+
+  y += headerH;
 
   // ---- Invoice meta ----
-  const metaH = 52;
-  box(left, y, width, metaH);
-  doc.moveTo(left + width * 0.5, y).lineTo(left + width * 0.5, y + metaH).strokeColor(LINE).stroke();
-  
+  const rowH = 14;
   const metaRows = [
     ['Invoice No.', invoice.invoice_no],
-    ['Invoice Date.', invoice.invoice_date],
+    ['Invoice Date.', invoice.invoice_date.split(' ')[0]],
     ['Terms', invoice.payment_terms || business.default_payment_terms || 'Due on Receipt'],
-    ['Due Date', invoice.due_date || invoice.invoice_date],
+    ['Due Date', invoice.due_date ? invoice.due_date.split(' ')[0] : invoice.invoice_date.split(' ')[0]],
   ];
+  
+  const metaH = metaRows.length * rowH;
+  box(left, y, width, metaH);
+  vLine(left + width * 0.5, y, metaH); 
+  vLine(left + 80, y, metaH); 
   
   doc.fontSize(9);
   metaRows.forEach(([label, value], i) => {
-    const ry = y + 2 + i * 12;
+    const ry = y + i * rowH;
+    if (i > 0) hLine(ry, left, width / 2);
     doc.font('Times-Roman');
-    text(label, left + 4, ry, { width: 80 });
-    doc.font('Times-Roman');
-    text(value, left + 80, ry, { width: width * 0.5 - 84 });
+    text(label, left + 2, ry + 3, { width: 76 });
+    text(value, left + 82, ry + 3, { width: width * 0.5 - 84 });
   });
 
   doc.font('Times-Roman');
-  text('Place Of Supply', left + width * 0.5 + 4, y + 2);
-  text(`: ${invoice.place_of_supply || '-'}`, left + width * 0.5 + 100, y + 2);
-  
-  text('Payment', left + width * 0.5 + 4, y + 26);
-  text(`: ${invoice.payment_mode || '-'} (${invoice.payment_status || '-'})`, left + width * 0.5 + 100, y + 26);
+  text('Place Of Supply', left + width * 0.5 + 2, y + 3, { width: 90 });
+  text(`: ${invoice.place_of_supply || 'Telangana(36)'}`, left + width * 0.5 + 90, y + 3);
+
   y += metaH;
 
   // ---- Bill To / Ship To ----
   const partyH = 65;
   box(left, y, width, partyH);
-  doc.moveTo(left + width / 2, y).lineTo(left + width / 2, y + partyH).strokeColor(LINE).stroke();
+  vLine(left + width / 2, y, partyH);
+  hLine(y + 14);
+  
   const party = (title, name, address, extra, x) => {
     doc.font('Times-Bold').fontSize(10);
-    text(title, x + 4, y + 2);
-    box(x, y + 14, width / 2, 0); // underline title
+    text(title, x + 2, y + 3);
     doc.font('Times-Roman').fontSize(9);
-    text(name || '-', x + 4, y + 16, { width: width / 2 - 8 });
-    if (address) text(address, x + 4, doc.y + 1, { width: width / 2 - 8, height: 22, ellipsis: true });
+    text(name || '-', x + 2, y + 17, { width: width / 2 - 4 });
+    if (address) text(address, x + 2, doc.y + 1, { width: width / 2 - 4, height: 22, ellipsis: true });
     if (extra) {
       doc.font('Times-Bold');
-      text(extra, x + 4, y + partyH - 12, { width: width / 2 - 8 });
+      text(extra, x + 2, y + partyH - 12, { width: width / 2 - 4 });
     }
   };
   party('Bill To', invoice.customer_name || 'Walk-in Customer', invoice.customer_address,
     invoice.customer_gstin ? `GSTIN                  ${invoice.customer_gstin}` : '', left);
   party('Ship To', invoice.ship_to_name || invoice.customer_name || 'Walk-in Customer',
     invoice.ship_to_address || invoice.customer_shipping_address || invoice.customer_address,
-    invoice.customer_phone ? `Phone ${invoice.customer_phone}` : '', left + width / 2);
+    '', left + width / 2);
   y += partyH;
 
   // ---- Item grid ----
   const cols = columns(left, width, interState);
   const headH = 24;
-  box(left, y, width, headH);
+  const minRows = 5;
+  const numRows = Math.max(items.length, minRows);
+  const itemsHeight = numRows * rowH;
   
-  const rowH = 14;
-  const itemsHeight = items.length * rowH;
-  
-  // Draw outer box for the items grid to close the left and right cells
-  box(left, y + headH, width, itemsHeight);
+  box(left, y, width, headH + itemsHeight);
   
   doc.font('Times-Bold').fontSize(9);
   cols.forEach((c, i) => {
-    // Draw vertical lines only down to the end of the item rows
-    if (i) doc.moveTo(c.x, y).lineTo(c.x, y + headH + itemsHeight).lineWidth(0.5).strokeColor(LINE).stroke();
+    if (i) vLine(c.x, y, headH + itemsHeight);
     text(c.label, c.x + 2, y + 4, { width: c.w - 4, align: c.align });
   });
+  hLine(y + headH);
   y += headH;
 
-  const money0 = (v) => amount(v);
-  
+  const money0 = (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   let currentY = y;
   
-  items.forEach((item, i) => {
-    doc.font('Times-Roman').fontSize(9);
-    const gstHalf = interState ? [money0(item.gst_amount)]
-      : [money0(item.gst_amount / 2), money0(item.gst_amount / 2)];
-      
-    const cells = [String(i + 1), item.description, item.hsn_code || '-', String(item.qty),
-      money0(item.unit_price), money0(item.total), money0(item.taxable_value), ...gstHalf];
-      
-    cells.forEach((cell, ci) => {
-      text(cell, cols[ci].x + 2, currentY + 2, { width: cols[ci].w - 4, align: cols[ci].align });
-    });
-    
-    currentY += rowH;
-    // We already have the outer box, but we need horizontal lines between rows if there are multiple
-    if (i < items.length - 1) {
-      doc.moveTo(left, currentY).lineTo(right, currentY).stroke();
+  for (let i = 0; i < numRows; i++) {
+    const item = items[i];
+    if (item) {
+      doc.font('Times-Roman').fontSize(9);
+      const gstHalf = interState ? [money0(item.gst_amount)]
+        : [money0(item.gst_amount / 2), money0(item.gst_amount / 2)];
+        
+      const cells = [String(i + 1), item.description, item.hsn_code || '-', String(item.qty),
+        money0(item.unit_price), money0(item.total), money0(item.taxable_value), ...gstHalf];
+        
+      cells.forEach((cell, ci) => {
+        text(cell, cols[ci].x + 2, currentY + 3, { width: cols[ci].w - 4, align: cols[ci].align });
+      });
     }
-  });
+    currentY += rowH;
+    if (i < numRows - 1) hLine(currentY);
+  }
   
   // Sub Total Row
   doc.font('Times-Bold').fontSize(9);
   box(left, currentY, width, rowH);
-  text('Sub Total', cols[4].x - 60, currentY + 2, { width: 56, align: 'right' });
+  text('Sub Total', cols[3].x, currentY + 3, { width: cols[4].x - cols[3].x + cols[4].w - 4, align: 'right' });
   
-  // Draw vertical lines for Sub Total row starting from col 5 (Total Incl)
-  for (let i = 5; i < cols.length; i++) {
-    doc.moveTo(cols[i].x, currentY).lineTo(cols[i].x, currentY + rowH).stroke();
-  }
+  for (let i = 5; i < cols.length; i++) vLine(cols[i].x, currentY, rowH);
   
   const gstTotals = interState ? [money0(invoice.igst)] : [money0(invoice.cgst), money0(invoice.sgst)];
   const subtotals = [money0(invoice.total), money0(invoice.subtotal), ...gstTotals];
   subtotals.forEach((val, i) => {
     const ci = 5 + i;
-    text(val, cols[ci].x + 2, currentY + 2, { width: cols[ci].w - 4, align: cols[ci].align });
+    text(val, cols[ci].x + 2, currentY + 3, { width: cols[ci].w - 4, align: cols[ci].align });
   });
   currentY += rowH;
   
   // Total Row
   box(left, currentY, width, rowH);
-  
-  // Draw one vertical line before "Total" to separate the left and right halves
-  doc.moveTo(cols[5].x, currentY).lineTo(cols[5].x, currentY + rowH).stroke();
+  vLine(cols[5].x, currentY, rowH);
   
   const unitsTotal = items.reduce((s, it) => s + Number(it.qty), 0);
   doc.font('Times-Roman');
-  text(`Items Total ${amount(unitsTotal)}`, left + 2, currentY + 2);
+  text(`Items Total ${Number(unitsTotal).toFixed(2)}`, left + 2, currentY + 3);
   doc.font('Times-Bold');
-  text('Total', cols[5].x + 2, currentY + 2);
-  text(`₹ ${money0(invoice.total)}`, cols[6].x + 2, currentY + 2, { width: right - cols[6].x - 4, align: 'right' });
+  text('Total', cols[5].x + 2, currentY + 3);
+  text(`Rs. ${money0(invoice.total)}`, cols[6].x + 2, currentY + 3, { width: right - cols[6].x - 6, align: 'right' });
   currentY += rowH;
   y = currentY;
 
   // ---- Product brief ----
-  if (invoice.product_brief || items.some(i => i.serials && i.serials.length)) {
-    doc.font('Times-Bold').fontSize(10);
-    text('Product Brief :', left, y + 2);
+  const briefH = 36;
+  box(left, y, width, briefH);
+  if (invoice.product_brief || items.some(i => i.serials && i.serials.length) || items.length) {
+    doc.font('Times-Bold').fontSize(9);
+    text('Product Brief :', left + 2, y + 2);
+    doc.moveTo(left + 2, y + 12).lineTo(left + 58, y + 12).lineWidth(0.5).strokeColor(LINE).stroke();
     doc.font('Times-Italic').fontSize(8);
-    let briefY = doc.y + 2;
-    
-    // Custom brief from manual input
-    if (invoice.product_brief) {
-      text(invoice.product_brief, left, briefY, { width: width - 10 });
-      briefY = doc.y + 2;
-    }
-    
-    // Auto serials brief
+    let parts = [];
     items.forEach((item, i) => {
-      if (item.serials && item.serials.length) {
-        text(`${i + 1}. ST: ${item.serials.join(', ')}`, left, briefY, { width: width - 10 });
-        briefY = doc.y + 2;
-      }
+      let desc = `${i + 1}. ${item.description}`;
+      if (item.serials && item.serials.length) desc += ` ST:${item.serials.join(', ')}`;
+      parts.push(desc);
     });
-    
-    y = briefY + 4;
+    text(parts.join('. '), left + 2, y + 14, { width: width - 4, height: briefH - 16, ellipsis: true });
   }
-  doc.moveTo(left, y).lineTo(right, y).stroke();
+  y += briefH;
 
   // ---- Amount in words ----
+  const wordsH = 26;
+  box(left, y, width, wordsH);
   doc.font('Times-Roman').fontSize(9);
-  text('Total In words', left, y + 2);
+  text('Total In words', left + 2, y + 2);
   doc.font('Times-Bold').fontSize(10);
-  text(rupeesInWords(invoice.total), left, doc.y + 2, { width: width - 10 });
-  y = doc.y + 4;
-  doc.moveTo(left, y).lineTo(right, y).stroke();
+  text(rupeesInWords(invoice.total), left + 2, y + 13, { width: width - 4 });
+  y += wordsH;
 
   // ---- Bank details, QR and signatory ----
-  const qr = await qrDataUrl(invoice, business, baseUrl);
-  const bankH = 100;
-  // No box here as per user request to simplify the footer
+  const bankH = 120;
+  box(left, y, width, bankH);
+  vLine(left + width * 0.6, y, bankH);
   
-  doc.font('Times-Bold').fontSize(9);
-  text('Bank Details', left, y + 2);
+  doc.font('Times-Roman').fontSize(9);
+  text('Bank Details', left + 2, y + 2);
   
   const bankLines = [
     business.bank_account_name ? `Account Name : ${business.bank_account_name}` : '',
-    business.bank_account_no ? `A/c No             : ${business.bank_account_no}` : '',
+    business.bank_account_no ? `A/cNo              : ${business.bank_account_no}` : '',
     business.bank_branch_ifsc ? `Br & IFSC        : ${business.bank_branch_ifsc}` : '',
     !business.bank_account_name && !business.bank_account_no && business.bank_details ? business.bank_details : '',
   ].filter(Boolean);
   
   let bankY = y + 14;
-  bankLines.forEach((line) => { text(line, left, bankY, { width: 300 }); bankY += 12; });
+  bankLines.forEach((line) => { text(line, left + 2, bankY, { width: width * 0.6 - 4 }); bankY += 12; });
 
-  let qrBottomY = bankY;
+  const qr = await qrDataUrl(invoice, business, baseUrl);
   if (qr.dataUrl) {
-    doc.image(Buffer.from(qr.dataUrl.split(',')[1], 'base64'), left + 2, bankY + 2, { width: 60 });
-    qrBottomY = bankY + 65;
+    doc.image(Buffer.from(qr.dataUrl.split(',')[1], 'base64'), left + 2, bankY + 2, { width: 45 });
   }
 
   // Signatory
   doc.font('Times-Roman').fontSize(9);
-  text(`For ${business.name}`, left + width * 0.6 + 4, y + 2, { width: width * 0.4 - 8, align: 'right' });
+  text(`For ${business.name || 'Thirumala Computer Services'}`, left + width * 0.6 + 4, y + 36, { width: width * 0.4 - 8, align: 'right' });
   text('Authorized Signatory', left + width * 0.6 + 4, y + bankH - 12, { width: width * 0.4 - 8, align: 'right' });
-  
-  y = Math.max(y + bankH, qrBottomY + 10);
+  y += bankH;
 
   // ---- Terms and declaration ----
-  doc.font('Times-Roman').fontSize(9);
+  const footerH = 65;
+  box(left, y, width, footerH);
+  hLine(y + 40); 
+  
+  doc.font('Times-Roman').fontSize(8);
   if (business.terms) {
-    text('Terms and Conditions:', left, y + 2);
+    text('Terms of Conditions:', left + 2, y + 2);
     const terms = business.terms.split('\n').map((t, i) => `${i + 1}. ${t.replace(/^\d+\.\s*/, '')}`);
-    let ty = doc.y + 2;
-    terms.forEach(t => { text(t, left, ty); ty += 10; });
-    y = ty + 4;
+    let ty = y + 12;
+    terms.forEach(t => { text(t, left + 2, ty); ty += 9; });
+  } else {
+    text('Terms of Conditions:', left + 2, y + 2);
+    text('1. Goods warranty covers asper the manufacturer terms', left + 2, y + 12);
+    text('2. Physical damage of product must be checked on arrival.', left + 2, y + 21);
+    text('3. warranty does not cover upon electric burning', left + 2, y + 30);
   }
   
-  doc.moveTo(left, y).lineTo(right, y).stroke();
-  
-  if (business.declaration) {
-    text('Declaration', left, y + 2);
-    text(business.declaration, left, doc.y + 2, { width: width - 10 });
-  }
+  doc.font('Times-Roman').fontSize(8);
+  text('Declaration', left + 2, y + 42);
+  doc.fontSize(7);
+  text(business.declaration || 'We declare that this invoice shows the actual charges of the Services described and that all particulars are true and correct.', left + 2, y + 52, { width: width - 4 });
 
   // ---- Page footer ----
   const pages = doc.bufferedPageRange();

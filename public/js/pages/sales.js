@@ -416,7 +416,7 @@
       wireLinks(list);
       wireMenus(list, {
         view: (row) => { window.location.hash = `#/sales/invoice/${row.dataset.id}`; },
-        print: (row) => { window.location.hash = `#/sales/invoice/${row.dataset.id}`; setTimeout(() => window.print(), 900); },
+        print: (row) => window.api.openPdf(`/api/invoices/${row.dataset.id}/pdf`).catch(errorToast),
         pdf: (row) => window.api.download(`/api/invoices/${row.dataset.id}/pdf`, {}, `${row.dataset.no}.pdf`),
         share: (row) => shareOnWhatsApp(row.dataset.no, Number(row.dataset.total)),
       });
@@ -595,12 +595,12 @@
     if (pdfBtn) pdfBtn.addEventListener('click',
       () => window.api.download(`/api/invoices/${id}/pdf`, {}, `${inv.invoice_no.replace(/\//g, '-')}.pdf`).catch(errorToast));
     const printBtn = view.querySelector('#print');
-    if (printBtn) printBtn.addEventListener('click', () => window.print());
+    if (printBtn) printBtn.addEventListener('click', () => window.api.openPdf(`/api/invoices/${id}/pdf`).catch(errorToast));
 
     const wireInvoiceMenu = () => wireMenus(view, {
       edit: () => { window.location.hash = `#/sales/create/${inv.id}`; },
-      print: () => window.print(),
-      pdf: () => window.api.download(`/api/invoices/${inv.id}/pdf`, {}, `${inv.invoice_no}.pdf`),
+      print: () => window.api.openPdf(`/api/invoices/${inv.id}/pdf`).catch(errorToast),
+      pdf: () => window.api.download(`/api/invoices/${inv.id}/pdf`, {}, `${inv.invoice_no.replace(/\//g, '-')}.pdf`),
       share: () => shareOnWhatsApp(inv.invoice_no, inv.total, inv.customer_phone),
       return: () => { window.location.hash = '#/sales/returns/new'; },
       cancel: () => askCancel(),
