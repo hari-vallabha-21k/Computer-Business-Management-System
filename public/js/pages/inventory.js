@@ -1245,6 +1245,7 @@
         title: `HSN: ${esc(data.hsn.code)}`,
         sub: esc(data.hsn.description),
         back: '#/inventory/hsn',
+        actions: data.sales.length ? '<button id="export-hsn-excel" class="btn primary">Export Excel</button>' : ''
       })}
         <div class="row">
           <div class="card col">
@@ -1271,7 +1272,6 @@
         <div class="card" style="margin-top:24px">
           <div class="card-head">
             <h2>Sales History</h2>
-            ${data.sales.length ? '<button id="export-hsn-excel" class="btn">Export Excel</button>' : ''}
           </div>
           ${data.sales.length ? table(data.sales, [
           { label: 'Invoice No.', class: 'doc', render: (r) => esc(r.invoice_no) },
