@@ -187,6 +187,27 @@ test('a report downloads as a spreadsheet as well as CSV', async () => {
   assert.match(text, /Design Sold Item/);
 });
 
+test('an adjustment can be entered as a shelf count in plain words', async () => {
+  const product = await makeProduct({ name: 'Design Count Item', opening_stock: 10 });
+  const res = await api('POST', '/api/inventory/adjust', {
+    product_id: product.id, new_qty: 9, reason: 'Warranty Replacement', note: 'Swapped under warranty',
+  }, 'admin');
+  assert.equal(res.status, 201);
+  assert.equal(res.body.balance, 9, 'the physical count becomes the new stock');
+  const movement = db.prepare(
+    "SELECT * FROM inventory_transactions WHERE product_id = ? AND type IN ('ADJUSTMENT','DAMAGE') ORDER BY id DESC",
+  ).get(product.id);
+  assert.equal(movement.qty, -1, 'the ledger stores the difference, not the count');
+  assert.equal(movement.reason, 'WARRANTY');
+
+  const same = await api('POST', '/api/inventory/adjust', { product_id: product.id, new_qty: 9, reason: 'Lost' }, 'admin');
+  assert.equal(same.status, 422, 'counting the same number is not an adjustment');
+
+  const nonsense = await api('POST', '/api/inventory/adjust', { product_id: product.id, new_qty: 4, reason: 'Because' }, 'admin');
+  assert.equal(nonsense.status, 422);
+  assert.match(nonsense.body.error, /damaged/);
+});
+
 test('the invoice numbering can be set to continue from a given number', async () => {
   const res = await api('PUT', '/api/settings', { next_invoice_no: 5000 }, 'admin');
   assert.equal(res.status, 200);

@@ -98,32 +98,40 @@ router.post('/add-stock', requirePermission('stock'), wrap((req, res) => {
 // POST /api/inventory/adjust - controlled stock adjustment (Section 21)
 router.post('/adjust', requireRole('ADMIN'), wrap((req, res) => {
   const b = req.body;
-  required(b, ['product_id', 'qty', 'reason']);
+  required(b, ['product_id', 'reason']);
   const productId = Number(b.product_id);
-  const qty = num(b.qty);
-  if (qty === 0) throw new AppError('Adjustment quantity cannot be zero.', 422);
-  const reason = str(b.reason);
+  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
+  if (!product) throw new AppError('Product not found.', 404);
+
+  // The screen counts the shelf ("physical stock"); the ledger stores the difference.
+  const qty = b.new_qty === undefined || b.new_qty === ''
+    ? num(b.qty)
+    : round2(num(b.new_qty) - product.stock);
+  if (qty === 0) throw new AppError('The physical count already matches the system.', 422);
+
   const ALLOWED = ['DAMAGED', 'LOST', 'MISSING', 'WARRANTY', 'CORRECTION', 'OTHER'];
-  if (!ALLOWED.includes(reason.toUpperCase())) {
-    throw new AppError(`Reason must be one of: ${ALLOWED.join(', ')}.`, 422);
+  // "Warranty replacement" and "Manual correction" are the same reasons in longhand.
+  const words = str(b.reason).toUpperCase().replace(/[^A-Z ]/g, ' ').split(/\s+/).filter(Boolean);
+  const reason = ALLOWED.find((code) => words.includes(code)) || '';
+  if (!reason) {
+    throw new AppError(`Reason must be one of: ${ALLOWED.map((r) => r.toLowerCase()).join(', ')}.`, 422);
   }
 
   const out = tx(() => {
     const adjNo = nextNumber(settings().adjustment_prefix || 'ADJ', 1);
     // Damage write-offs are logged under their own type; everything else is a signed adjustment.
-    const damage = reason.toUpperCase() === 'DAMAGED' && qty < 0;
+    const damage = reason === 'DAMAGED' && qty < 0;
     const move = inv.move({
       productId, type: damage ? 'DAMAGE' : 'ADJUSTMENT', qty: damage ? Math.abs(qty) : qty,
-      referenceType: 'ADJUSTMENT', referenceNo: adjNo, reason: reason.toUpperCase(),
+      referenceType: 'ADJUSTMENT', referenceNo: adjNo, reason,
       note: str(b.note), userId: req.user.id,
     });
     if (Array.isArray(b.serials) && b.serials.length) {
       for (const serial of b.serials) {
         db.prepare("UPDATE serial_numbers SET status = ?, note = ? WHERE serial = ?")
-          .run(qty < 0 ? 'DAMAGED' : 'AVAILABLE', reason.toUpperCase(), str(serial));
+          .run(qty < 0 ? 'DAMAGED' : 'AVAILABLE', reason, str(serial));
       }
     }
-    const product = db.prepare('SELECT name FROM products WHERE id = ?').get(productId);
     if (Math.abs(qty) >= 5) {
       db.prepare(`INSERT INTO notifications (level, type, message, link)
         VALUES ('WARN', 'ADJUSTMENT', ?, ?)`)

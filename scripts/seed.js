@@ -91,16 +91,29 @@ function seed() {
       .run(name, phone, email, address, gstin);
   }
 
+  // Where each kind of product sits on the shelves, so the inventory screen has somewhere to point.
+  const LOCATIONS = {
+    Laptops: 'Display shelf A', Processors: 'Counter drawer 2', Storage: 'Counter drawer 1',
+    Components: 'Rack B', Monitors: 'Display wall', Accessories: 'Front counter',
+  };
+
   tx(() => {
     for (const [code, name, category, brand, model, hsn, cost, price, minStock, serialTracked, qty] of PRODUCTS) {
-      let cat = db.prepare('SELECT id FROM categories WHERE name = ?').get(category);
-      if (!cat) cat = { id: Number(db.prepare('INSERT INTO categories (name) VALUES (?)').run(category).lastInsertRowid) };
       const hsnRow = db.prepare('SELECT * FROM hsn_codes WHERE code = ?').get(hsn);
+      let cat = db.prepare('SELECT id FROM categories WHERE name = ?').get(category);
+      if (!cat) {
+        // The category carries the tax defaults, so a new product only needs its category chosen.
+        cat = {
+          id: Number(db.prepare('INSERT INTO categories (name, hsn_id, gst_rate) VALUES (?, ?, ?)')
+            .run(category, hsnRow.id, hsnRow.gst_rate).lastInsertRowid),
+        };
+      }
       const id = Number(db.prepare(`
         INSERT INTO products (product_code, name, category_id, brand, model, hsn_id, gst_rate, purchase_price,
-          selling_price, min_stock, serial_tracked, stock)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
-        .run(code, name, cat.id, brand, model, hsnRow.id, hsnRow.gst_rate, cost, price, minStock, serialTracked)
+          selling_price, min_stock, serial_tracked, location, stock)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+        .run(code, name, cat.id, brand, model, hsnRow.id, hsnRow.gst_rate, cost, price, minStock, serialTracked,
+          LOCATIONS[category] || '')
         .lastInsertRowid);
 
       if (serialTracked) {
