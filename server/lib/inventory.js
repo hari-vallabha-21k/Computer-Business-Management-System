@@ -2,6 +2,9 @@
 const { db, settings } = require('../db');
 const { AppError, round2 } = require('./util');
 
+/** Services are sold on invoices but never held on a shelf. */
+const isService = (product) => !!product && product.item_type === 'SERVICE';
+
 const SIGN = {
   OPENING: 1, PURCHASE: 1, RETURN: 1,
   SALE: -1, DAMAGE: -1, CANCELLED_SALE: 1,
@@ -18,6 +21,7 @@ function move({ productId, type, qty, unitCost = 0, referenceType = '', referenc
   referenceNo = '', reason = '', note = '', userId = null, allowNegative = null }) {
   const product = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
   if (!product) throw new AppError(`Product ${productId} not found`, 404);
+  if (isService(product)) throw new AppError(`${product.name} is a service and has no stock to move.`, 422);
 
   const sign = SIGN[type];
   if (sign === undefined) throw new AppError(`Unknown stock movement type: ${type}`, 422);
@@ -87,4 +91,4 @@ function addSerials(productId, serials, { purchaseId = null } = {}) {
   }
 }
 
-module.exports = { move, ledgerStock, addSerials, assertSerialsAvailable, maybeLowStockAlert };
+module.exports = { isService, move, ledgerStock, addSerials, assertSerialsAvailable, maybeLowStockAlert };

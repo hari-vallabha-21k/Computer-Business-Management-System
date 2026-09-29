@@ -300,6 +300,8 @@ const MIGRATIONS = [
   ['purchases', 'checked_at', 'TEXT'],
   ['purchases', 'checked_by', 'INTEGER REFERENCES users(id)'],
   ['invoices', 'amount_paid', 'REAL NOT NULL DEFAULT 0'],
+  // Services (installation, repairs, AMC) live in the product master but carry no stock.
+  ['products', 'item_type', "TEXT NOT NULL DEFAULT 'PRODUCT'"],
 ];
 for (const [table, column, definition] of MIGRATIONS) ensureColumn(table, column, definition);
 

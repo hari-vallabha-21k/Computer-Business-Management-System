@@ -38,7 +38,7 @@ const REPORTS = {
         COALESCE((SELECT SUM(qty) FROM inventory_transactions t WHERE t.product_id = p.id AND t.type = 'RETURN' AND date(t.created_at) BETWEEN ? AND ?), 0) AS returns,
         COALESCE((SELECT SUM(qty) FROM inventory_transactions t WHERE t.product_id = p.id AND t.type IN ('ADJUSTMENT','DAMAGE') AND date(t.created_at) BETWEEN ? AND ?), 0) AS adjustments
       FROM products p LEFT JOIN hsn_codes h ON h.id = p.hsn_id
-      WHERE p.active = 1${f.sql} ORDER BY p.name`).all(from, to, from, to, from, to, from, to, ...f.params),
+      WHERE p.active = 1 AND p.item_type = 'PRODUCT'${f.sql} ORDER BY p.name`).all(from, to, from, to, from, to, from, to, ...f.params),
   },
   sales: {
     label: 'Sales Report',

@@ -7,6 +7,7 @@
 const { db, tx } = require('../server/db');
 const { createUser } = require('../server/lib/auth');
 const inv = require('../server/lib/inventory');
+const { round2 } = require('../server/lib/util');
 
 function reset() {
   const tables = ['return_items', 'sales_returns', 'invoice_items', 'invoices', 'purchase_items', 'purchases',
@@ -25,6 +26,16 @@ const HSN = [
   ['85235290', 'Solid state storage devices', 18],
   ['84716060', 'Keyboards, mice and input devices', 18],
   ['85285900', 'Monitors and display units', 18],
+  ['998713', 'Maintenance and repair of computers (SAC)', 18],
+  ['998314', 'IT design and installation services (SAC)', 18],
+];
+
+// Services are billed like products but carry no stock.
+const SERVICES = [
+  ['SRV-001', 'Windows OS Installation', '998314', 0, 800, 'OS install with drivers and updates'],
+  ['SRV-002', 'Laptop Service & Cleaning', '998713', 0, 1200, 'Internal cleaning, thermal paste, health check'],
+  ['SRV-003', 'Data Backup & Recovery', '998713', 0, 1500, 'Copy or recover data from a working or failed drive'],
+  ['SRV-004', 'On-site Installation Visit', '998314', 0, 500, 'Set up a PC, printer or router at the customer site'],
 ];
 
 const PRODUCTS = [
@@ -125,6 +136,20 @@ function seed() {
         referenceNo: 'OPENING', note: 'Opening stock', userId: admin.id,
       });
     }
+    let services = db.prepare("SELECT id FROM categories WHERE name = 'Services'").get();
+    if (!services) {
+      const sac = db.prepare("SELECT * FROM hsn_codes WHERE code = '998713'").get();
+      services = { id: Number(db.prepare('INSERT INTO categories (name, hsn_id, gst_rate) VALUES (?, ?, ?)')
+        .run('Services', sac.id, sac.gst_rate).lastInsertRowid) };
+    }
+    for (const [code, name, sac, cost, price, description] of SERVICES) {
+      const sacRow = db.prepare('SELECT * FROM hsn_codes WHERE code = ?').get(sac);
+      db.prepare(`
+        INSERT INTO products (product_code, name, category_id, hsn_id, gst_rate, purchase_price, selling_price,
+          description, item_type, stock)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SERVICE', 0)`)
+        .run(code, name, services.id, sacRow.id, sacRow.gst_rate, cost, price, description);
+    }
   });
 
   // A handful of issued invoices spread over the last three weeks.
@@ -132,10 +157,10 @@ function seed() {
   const products = db.prepare('SELECT * FROM products').all();
   const pick = (code) => products.find((p) => p.product_code === code);
   const SALES = [
-    [1, daysAgo(18), [['LAP-001', 1], ['ACC-001', 1]]],
+    [1, daysAgo(18), [['LAP-001', 1], ['ACC-001', 1], ['SRV-001', 1]]],
     [2, daysAgo(15), [['CPU-001', 2], ['RAM-001', 2]]],
-    [3, daysAgo(12), [['SSD-001', 1]]],
-    [4, daysAgo(9), [['LAP-002', 1], ['MON-001', 1]]],
+    [3, daysAgo(12), [['SSD-001', 1], ['SRV-003', 1]]],
+    [4, daysAgo(9), [['LAP-002', 1], ['MON-001', 1], ['SRV-004', 1]]],
     [1, daysAgo(6), [['CPU-002', 1], ['RAM-001', 1]]],
     [2, daysAgo(4), [['ACC-002', 3], ['ACC-001', 2]]],
     [3, daysAgo(2), [['LAP-001', 1]]],
@@ -183,7 +208,7 @@ function seed() {
         }
       }
       db.prepare('UPDATE invoices SET subtotal = ?, gst_amount = ?, cgst = ?, sgst = ?, total = ? WHERE id = ?')
-        .run(subtotal, gst, gst / 2, gst / 2, subtotal + gst, invoiceId);
+        .run(round2(subtotal), round2(gst), round2(gst / 2), round2(gst - round2(gst / 2)), round2(subtotal + gst), invoiceId);
       db.prepare("INSERT INTO counters (name, value) VALUES ('TCS', ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value")
         .run(counter);
       issueInvoice(invoiceId, admin.id);

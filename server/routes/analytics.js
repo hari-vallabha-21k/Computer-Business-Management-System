@@ -27,17 +27,24 @@ const ITEM_JOIN = `
 function summaryFor(query) {
   const { clause, params } = salesFilter(query);
   const sold = db.prepare(`
-    SELECT COALESCE(SUM(it.qty - it.returned_qty), 0) AS units,
+    SELECT COALESCE(SUM(CASE WHEN p.item_type = 'SERVICE' THEN 0 ELSE it.qty - it.returned_qty END), 0) AS units,
+           COALESCE(SUM(CASE WHEN p.item_type = 'SERVICE' THEN it.qty - it.returned_qty ELSE 0 END), 0) AS services,
            COALESCE(SUM((it.qty - it.returned_qty) * (it.taxable_value / NULLIF(it.qty, 0))), 0) AS revenue,
            COALESCE(SUM((it.qty - it.returned_qty) * it.cost_price), 0) AS cost,
-           COALESCE(SUM((it.qty - it.returned_qty) * (it.total / NULLIF(it.qty, 0))), 0) AS revenue_with_tax
+           COALESCE(SUM((it.qty - it.returned_qty) * (it.total / NULLIF(it.qty, 0))), 0) AS revenue_with_tax,
+           COALESCE(SUM(CASE WHEN p.item_type = 'SERVICE'
+             THEN (it.qty - it.returned_qty) * (it.taxable_value / NULLIF(it.qty, 0)) ELSE 0 END), 0) AS service_revenue
     ${ITEM_JOIN} WHERE ${clause}`).get(...params);
   const invoices = db.prepare(`
     SELECT COUNT(DISTINCT i.id) AS count ${ITEM_JOIN} WHERE ${clause}`).get(...params);
   return {
     unitsSold: round2(sold.units),
+    servicesSold: round2(sold.services),
     revenue: round2(sold.revenue),
     revenueWithTax: round2(sold.revenue_with_tax),
+    // Services earn revenue without selling stock; the split lets the dashboard show both.
+    serviceRevenue: round2(sold.service_revenue),
+    productRevenue: round2(sold.revenue - sold.service_revenue),
     cost: round2(sold.cost),
     grossProfit: round2(sold.revenue - sold.cost),
     invoices: invoices.count,
@@ -81,7 +88,7 @@ router.get('/dashboard', wrap((req, res) => {
            COALESCE(SUM(stock * purchase_price), 0) AS value,
            COALESCE(SUM(CASE WHEN stock <= 0 THEN 1 ELSE 0 END), 0) AS out_of_stock,
            COALESCE(SUM(CASE WHEN stock > 0 AND min_stock > 0 AND stock <= min_stock THEN 1 ELSE 0 END), 0) AS low_stock
-    FROM products WHERE active = 1`).get();
+    FROM products WHERE active = 1 AND item_type = 'PRODUCT'`).get();
 
   const purchases = db.prepare(`
     SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count
@@ -94,6 +101,9 @@ router.get('/dashboard', wrap((req, res) => {
     totalSales: current.revenueWithTax,
     netRevenue: current.revenue,
     itemsSold: current.unitsSold,
+    servicesSold: current.servicesSold,
+    serviceRevenue: current.serviceRevenue,
+    productRevenue: current.productRevenue,
     invoices: current.invoices,
     grossProfit: current.grossProfit,
     cost: current.cost,
@@ -213,10 +223,10 @@ router.get('/inventory', requireRole('ADMIN'), wrap((req, res) => {
     SELECT COALESCE(c.name, 'Uncategorised') AS category, COUNT(*) AS products,
            COALESCE(SUM(p.stock), 0) AS units, COALESCE(SUM(p.stock * p.purchase_price), 0) AS value
     FROM products p LEFT JOIN categories c ON c.id = p.category_id
-    WHERE p.active = 1 GROUP BY category ORDER BY value DESC`).all();
+    WHERE p.active = 1 AND p.item_type = 'PRODUCT' GROUP BY category ORDER BY value DESC`).all();
   const lowStock = db.prepare(`
     SELECT id, product_code, name, stock, min_stock FROM products
-    WHERE active = 1 AND (stock <= 0 OR (min_stock > 0 AND stock <= min_stock))
+    WHERE active = 1 AND item_type = 'PRODUCT' AND (stock <= 0 OR (min_stock > 0 AND stock <= min_stock))
     ORDER BY stock ASC LIMIT 20`).all();
   const serials = db.prepare(`
     SELECT status, COUNT(*) AS n FROM serial_numbers GROUP BY status`).all();

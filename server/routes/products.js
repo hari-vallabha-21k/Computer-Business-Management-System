@@ -33,6 +33,9 @@ function generateCode(categoryName) {
   return `${base}-${String(n).padStart(3, '0')}`;
 }
 
+/** 'SERVICE' or 'PRODUCT' from a request value; anything else is a product. */
+const itemType = (value) => (String(value || '').toUpperCase() === 'SERVICE' ? 'SERVICE' : 'PRODUCT');
+
 function resolveCategory(nameOrId) {
   if (!nameOrId) return null;
   if (/^\d+$/.test(String(nameOrId))) {
@@ -62,6 +65,9 @@ router.get('/', wrap((req, res) => {
   const where = ['p.active = 1'];
   const params = [];
   if (req.query.includeInactive === 'true') where.length = 0;
+  // Stock screens list goods only; services are asked for by name ('SERVICE', or 'ALL' for both).
+  const type = str(req.query.type).toUpperCase();
+  if (type !== 'ALL') { where.push('p.item_type = ?'); params.push(type === 'SERVICE' ? 'SERVICE' : 'PRODUCT'); }
   if (q) {
     where.push(`(p.name LIKE ? OR p.brand LIKE ? OR p.model LIKE ? OR p.product_code LIKE ? OR p.barcode LIKE ?
       OR h.code LIKE ? OR EXISTS (SELECT 1 FROM serial_numbers s WHERE s.product_id = p.id AND s.serial LIKE ?))`);
@@ -81,7 +87,7 @@ router.get('/', wrap((req, res) => {
 router.get('/filters', wrap((req, res) => {
   res.json({
     categories: db.prepare('SELECT id, name FROM categories ORDER BY name').all(),
-    brands: db.prepare("SELECT DISTINCT brand FROM products WHERE brand <> '' ORDER BY brand").all().map((r) => r.brand),
+    brands: db.prepare("SELECT DISTINCT brand FROM products WHERE brand <> '' AND item_type = 'PRODUCT' ORDER BY brand").all().map((r) => r.brand),
   });
 }));
 
@@ -89,7 +95,7 @@ router.get('/filters', wrap((req, res) => {
 router.post('/match', wrap((req, res) => {
   const text = str(req.body.text);
   if (!text) throw new AppError('Text to match is required.', 422);
-  const products = db.prepare(SELECT).all();
+  const products = db.prepare(`${SELECT} WHERE p.item_type = 'PRODUCT'`).all();
   const scored = products
     .map((p) => ({ product: p, score: similarity(text, `${p.name} ${p.brand} ${p.model}`) }))
     .filter((m) => m.score > 0.3)
@@ -156,7 +162,9 @@ router.post('/', requireRole('ADMIN'), wrap((req, res) => {
   const categoryId = resolveCategory(b.category);
   const fallback = categoryDefaults(categoryId);
   const hsn = resolveHsn(b.hsn_code || (fallback && fallback.hsn_code), b.gst_rate ?? (fallback && fallback.gst_rate));
-  const code = str(b.product_code) || generateCode(str(b.category));
+  const type = itemType(b.item_type);
+  const service = type === 'SERVICE';
+  const code = str(b.product_code) || generateCode(service ? 'SRV' : str(b.category));
   if (db.prepare('SELECT id FROM products WHERE product_code = ?').get(code)) {
     throw new AppError(`Product ID ${code} is already in use.`, 409);
   }
@@ -165,16 +173,17 @@ router.post('/', requireRole('ADMIN'), wrap((req, res) => {
     throw new AppError(`A product named "${b.name}" already exists. Use it, or resend with force to create a duplicate.`, 409, { existingId: duplicate.id });
   }
 
-  const openingStock = num(b.opening_stock, 0);
+  // A service has no shelf: no opening stock, reorder level or serial numbers.
+  const openingStock = service ? 0 : num(b.opening_stock, 0);
   const product = tx(() => {
     const id = Number(db.prepare(`
       INSERT INTO products (product_code, name, category_id, brand, model, hsn_id, gst_rate, purchase_price,
-        selling_price, min_stock, serial_tracked, barcode, description, location, stock)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+        selling_price, min_stock, serial_tracked, barcode, description, location, stock, item_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`)
       .run(code, str(b.name), categoryId, str(b.brand), str(b.model), hsn ? hsn.id : null,
         num(b.gst_rate, hsn ? hsn.gst_rate : (fallback ? fallback.gst_rate : 18)), num(b.purchase_price),
-        num(b.selling_price), num(b.min_stock), b.serial_tracked ? 1 : 0, str(b.barcode),
-        str(b.description), str(b.location)).lastInsertRowid);
+        num(b.selling_price), service ? 0 : num(b.min_stock), !service && b.serial_tracked ? 1 : 0, str(b.barcode),
+        str(b.description), service ? '' : str(b.location), type).lastInsertRowid);
 
     if (openingStock > 0) {
       if (b.serial_tracked && Array.isArray(b.serials) && b.serials.length) {
@@ -235,6 +244,7 @@ router.put('/:id', requireRole('ADMIN'), wrap((req, res) => {
   const b = req.body;
   const categoryId = b.category !== undefined ? resolveCategory(b.category) : current.category_id;
   const hsn = b.hsn_code !== undefined ? resolveHsn(b.hsn_code, b.gst_rate) : null;
+  const service = current.item_type === 'SERVICE';
   db.prepare(`
     UPDATE products SET name = ?, category_id = ?, brand = ?, model = ?, hsn_id = ?, gst_rate = ?,
       purchase_price = ?, selling_price = ?, min_stock = ?, serial_tracked = ?, barcode = ?, description = ?,
@@ -242,8 +252,8 @@ router.put('/:id', requireRole('ADMIN'), wrap((req, res) => {
     WHERE id = ?`)
     .run(str(b.name, current.name) || current.name, categoryId, str(b.brand, current.brand), str(b.model, current.model),
       hsn ? hsn.id : current.hsn_id, num(b.gst_rate, current.gst_rate), num(b.purchase_price, current.purchase_price),
-      num(b.selling_price, current.selling_price), num(b.min_stock, current.min_stock),
-      b.serial_tracked === undefined ? current.serial_tracked : (b.serial_tracked ? 1 : 0),
+      num(b.selling_price, current.selling_price), service ? 0 : num(b.min_stock, current.min_stock),
+      service || b.serial_tracked === undefined ? current.serial_tracked : (b.serial_tracked ? 1 : 0),
       str(b.barcode, current.barcode), str(b.description, current.description),
       str(b.location, current.location), b.active === undefined ? current.active : (b.active ? 1 : 0), id);
   res.json({ product: db.prepare(`${SELECT} WHERE p.id = ?`).get(id) });

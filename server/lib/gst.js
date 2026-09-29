@@ -25,27 +25,18 @@ function lineTotals({ qty, unitPrice, discount = 0, gstRate = 0, priceIncludesGs
 }
 
 /**
- * Totals for a whole invoice. Intra-state supply is split CGST/SGST; when the
- * customer's GSTIN state differs from the business state the tax is IGST.
+ * Totals for a whole invoice. The store bills every sale as CGST + SGST, each
+ * half of the line's GST (9% + 9% on an 18% item), whatever the customer's
+ * state; IGST is no longer charged. SGST takes the rounding remainder so the
+ * two halves always add back to the GST total.
  */
-function invoiceTotals(lines, { businessGstin = '', customerGstin = '' } = {}) {
+function invoiceTotals(lines) {
   const subtotal = round2(lines.reduce((s, l) => s + l.taxable, 0));
   const discount = round2(lines.reduce((s, l) => s + num(l.discount), 0));
   const gstAmount = round2(lines.reduce((s, l) => s + l.gstAmount, 0));
   const total = round2(lines.reduce((s, l) => s + l.total, 0));
-  const bs = stateCode(businessGstin);
-  const cs = stateCode(customerGstin);
-  const interState = !!(bs && cs && bs !== cs);
-  return {
-    subtotal,
-    discount,
-    gstAmount,
-    total,
-    interState,
-    cgst: interState ? 0 : round2(gstAmount / 2),
-    sgst: interState ? 0 : round2(gstAmount / 2),
-    igst: interState ? gstAmount : 0,
-  };
+  const cgst = round2(gstAmount / 2);
+  return { subtotal, discount, gstAmount, total, cgst, sgst: round2(gstAmount - cgst), igst: 0 };
 }
 
 module.exports = { lineTotals, invoiceTotals, stateOf: stateCode };

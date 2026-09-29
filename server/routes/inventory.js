@@ -38,7 +38,7 @@ router.get('/low-stock', wrap((req, res) => {
         WHERE pi.product_id = p.id AND s.name IS NOT NULL
         ORDER BY pu.id DESC LIMIT 1) AS usual_supplier
     FROM products p LEFT JOIN categories c ON c.id = p.category_id
-    WHERE p.active = 1 AND (p.stock <= 0 OR (p.min_stock > 0 AND p.stock <= p.min_stock))
+    WHERE p.active = 1 AND p.item_type = 'PRODUCT' AND (p.stock <= 0 OR (p.min_stock > 0 AND p.stock <= p.min_stock))
     ORDER BY (p.stock <= 0) DESC, p.stock ASC`).all();
   res.json({
     items,

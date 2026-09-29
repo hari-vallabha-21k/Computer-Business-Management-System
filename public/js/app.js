@@ -25,6 +25,7 @@
       href: '#/inventory', label: 'Inventory', icon: ICON.inventory, match: /^#\/inventory/,
       children: [
         { href: '#/inventory/products', label: 'Products', match: /^#\/inventory\/(products|add-product|product)/ },
+        { href: '#/inventory/services', label: 'Services', match: /^#\/inventory\/(services|add-service)/ },
         { href: '#/inventory/add-stock', label: 'Add Stock' },
         { href: '#/inventory/movements', label: 'Stock Movements', match: /^#\/inventory\/(movements|adjust)/ },
         { href: '#/inventory/low-stock', label: 'Low Stock', badge: 'lowStock' },
@@ -59,6 +60,9 @@
     [/^\/inventory\/products$/, (view) => window.Pages.inventory.products(view)],
     [/^\/inventory\/add-product$/, (view) => window.Pages.inventory.addProduct(view)],
     [/^\/inventory\/add-product\/(\d+)$/, (view, id) => window.Pages.inventory.addProduct(view, id)],
+    [/^\/inventory\/services$/, (view) => window.Pages.inventory.services(view)],
+    [/^\/inventory\/add-service$/, (view) => window.Pages.inventory.addService(view)],
+    [/^\/inventory\/add-service\/(\d+)$/, (view, id) => window.Pages.inventory.addService(view, id)],
     [/^\/inventory\/add-stock$/, (view) => window.Pages.inventory.addStock(view)],
     [/^\/inventory\/movements$/, (view) => window.Pages.inventory.movements(view)],
     [/^\/inventory\/adjust$/, (view) => window.Pages.inventory.adjust(view)],
@@ -88,7 +92,7 @@
 
   /** Pages only the owner may open; staff get a plain explanation instead. */
   const ADMIN_ONLY = [/^\/purchases/, /^\/suppliers/, /^\/analytics/, /^\/reports/, /^\/settings/,
-    /^\/inventory\/add-product/, /^\/inventory\/adjust/, /^\/inventory\/hsn/];
+    /^\/inventory\/add-product/, /^\/inventory\/add-service/, /^\/inventory\/adjust/, /^\/inventory\/hsn/];
 
   const counters = { lowStock: 0 };
 

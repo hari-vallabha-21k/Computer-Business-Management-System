@@ -28,7 +28,7 @@ router.get('/invoice/:invoiceNo', wrap((req, res) => {
   if (!invoice) throw new AppError('Invoice not found.', 404);
   if (invoice.status !== 'ISSUED') throw new AppError(`Only issued invoices can be returned (this one is ${invoice.status}).`, 409);
   const items = db.prepare(`
-    SELECT it.*, p.name AS product_name, p.serial_tracked, (it.qty - it.returned_qty) AS returnable
+    SELECT it.*, p.name AS product_name, p.serial_tracked, p.item_type, (it.qty - it.returned_qty) AS returnable
     FROM invoice_items it JOIN products p ON p.id = it.product_id
     WHERE it.invoice_id = ? ORDER BY it.id`).all(invoice.id);
   for (const item of items) {
@@ -86,12 +86,14 @@ router.post('/', wrap((req, res) => {
           .run(restock ? 'AVAILABLE' : 'DAMAGED', row.id);
       }
 
-      inv.move({
+      // A returned service is refunded, but there is nothing to put back on the shelf.
+      const service = inv.isService(db.prepare('SELECT * FROM products WHERE id = ?').get(item.product_id));
+      if (!service) inv.move({
         productId: item.product_id, type: 'RETURN', qty, unitCost: item.cost_price,
         referenceType: 'RETURN', referenceId: returnId, referenceNo: returnNo,
         reason: 'CUSTOMER_RETURN', note: str(b.reason), userId: req.user.id,
       });
-      if (!restock) {
+      if (!restock && !service) {
         // Goods came back damaged: the return is logged, then written straight off again.
         inv.move({
           productId: item.product_id, type: 'DAMAGE', qty, unitCost: item.cost_price,

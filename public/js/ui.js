@@ -272,8 +272,13 @@
   /**
    * Type-ahead product search box. Calls onSelect(product).
    * Used by invoicing, add stock and adjustments so products are searched, never typed.
+   * options.type 'SERVICE' searches services instead of goods. options.onCreate(text),
+   * when given, offers "+ Add New Product" for a search with no match; it resolves
+   * to the created record (or null), which is then selected like any other.
    */
   function productSearch(container, onSelect, options = {}) {
+    const service = options.type === 'SERVICE';
+    const noun = service ? 'service' : 'product';
     container.innerHTML = `
       <label>${esc(options.label || 'Product')}
         <input type="search" placeholder="${esc(options.placeholder || 'Search by name, brand, model, ID, HSN or serial…')}" autocomplete="off">
@@ -283,9 +288,22 @@
     const list = container.querySelector('.pick-list');
     let timer;
 
+    const choose = (product) => {
+      list.hidden = true;
+      input.value = options.keepText ? product.name : '';
+      onSelect(product);
+    };
+
     const render = (products) => {
-      if (!products.length) {
-        list.innerHTML = '<div class="item muted">No matching product. Add it from Inventory → Add Product.</div>';
+      const typed = input.value.trim();
+      if (!products.length && options.onCreate) {
+        list.innerHTML = `<div class="item muted">No ${noun} matches “${esc(typed)}”.</div>
+          <div class="item" data-new="1"><strong>+ Add New ${service ? 'Service' : 'Product'}</strong>
+            <span class="small muted">&nbsp;“${esc(typed)}”</span></div>`;
+      } else if (!products.length) {
+        list.innerHTML = service
+          ? '<div class="item muted">No matching service. Add it from Inventory → Services.</div>'
+          : '<div class="item muted">No matching product. Add it from Inventory → Add Product.</div>';
       } else {
         list.innerHTML = products.map((p) => `
           <div class="item" data-id="${p.id}">
@@ -294,33 +312,39 @@
               <div class="small muted">${esc(p.product_code)} · ${esc(p.brand || '-')} · HSN ${esc(p.hsn_code || '-')}</div>
             </div>
             <div class="right small">
-              <div class="tag ${p.stock <= 0 ? 'red' : (p.min_stock > 0 && p.stock <= p.min_stock ? 'amber' : 'green')}">Stock: ${qty(p.stock)}</div>
+              ${p.item_type === 'SERVICE' ? '<div class="tag blue">Service</div>'
+    : `<div class="tag ${p.stock <= 0 ? 'red' : (p.min_stock > 0 && p.stock <= p.min_stock ? 'amber' : 'green')}">Stock: ${qty(p.stock)}</div>`}
               <div class="muted">${money(p.selling_price)}</div>
             </div>
           </div>`).join('');
       }
       list.hidden = false;
       list.querySelectorAll('.item[data-id]').forEach((el) => {
-        el.addEventListener('click', () => {
-          const product = products.find((p) => String(p.id) === el.dataset.id);
-          list.hidden = true;
-          input.value = options.keepText ? product.name : '';
-          onSelect(product);
-        });
+        el.addEventListener('click', () => choose(products.find((p) => String(p.id) === el.dataset.id)));
       });
+      const add = list.querySelector('[data-new]');
+      if (add) {
+        add.addEventListener('click', async () => {
+          list.hidden = true;
+          const created = await options.onCreate(typed);
+          if (created) choose(created);
+        });
+      }
     };
 
-    const search = async () => {
+    const search = async (all = false) => {
       const q = input.value.trim();
-      if (q.length < 1) { list.hidden = true; return; }
+      if (q.length < 1 && !all) { list.hidden = true; return; }
       try {
-        const data = await window.api.get('/api/products', { q, limit: 12 });
+        const data = await window.api.get('/api/products', { q, limit: 12, type: service ? 'SERVICE' : '' });
         render(data.products);
       } catch (err) { errorToast(err); }
     };
 
-    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 180); });
-    input.addEventListener('focus', () => { if (input.value.trim()) search(); });
+
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => search(service), 180); });
+    // Services are few, so their picker lists them all before anything is typed.
+    input.addEventListener('focus', () => { if (input.value.trim() || service) search(service); });
     document.addEventListener('click', (e) => { if (!container.contains(e.target)) list.hidden = true; });
     return input;
   }

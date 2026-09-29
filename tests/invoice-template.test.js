@@ -86,7 +86,7 @@ test('an invoice carries terms, due date, place of supply and ship-to', async ()
   assert.match(invoice.invoice_no, /^TCS\/\d{4}\/\d{4}$/, 'numbering follows the configured format');
 });
 
-test('an out-of-state customer is taxed IGST, not CGST/SGST', async () => {
+test('an out-of-state customer is still billed CGST + SGST, never IGST', async () => {
   const product = await makeProduct({ opening_stock: 4, selling_price: 11800, gst_rate: 18 });
   const customer = (await api('POST', '/api/customers', {
     name: 'Mumbai Buyer Pvt Ltd', gstin: '27AABCS1429B1ZX',
@@ -96,9 +96,9 @@ test('an out-of-state customer is taxed IGST, not CGST/SGST', async () => {
   }, 'admin')).body;
 
   assert.equal(invoice.total, 11800);
-  assert.equal(invoice.igst, 1800);
-  assert.equal(invoice.cgst, 0);
-  assert.equal(invoice.sgst, 0);
+  assert.equal(invoice.igst, 0);
+  assert.equal(invoice.cgst, 900);
+  assert.equal(invoice.sgst, 900);
   assert.equal(invoice.place_of_supply, 'Maharashtra(27)');
 });
 
@@ -126,7 +126,7 @@ test('the template PDF renders with the template blocks', async () => {
     'Thirumala Computer Services', 'GSTIN 36AXIPK2327D1ZR',
     'Invoice No.', 'Invoice Date', 'Terms', 'Due Date', 'Place Of Supply',
     'Bill To', 'Ship To', 'Item & Description', 'HSN', 'Total', 'Incl', 'Taxable', 'Amount',
-    '9% CGST', '9% SGST', 'Sub Total', 'Items Total', 'Product Brief',
+    'CGST (9%)', 'SGST (9%)', 'Sub Total', 'Items Total', 'Product Brief',
     'Total In words', 'Rupees One Lakh Eleven Thousand Only',
     'Bank Details', 'Account Name : Thirumala Computer Services', 'A/c No', 'Br & IFSC',
     'For Thirumala Computer Services', 'Authorized Signatory', 'Declaration',

@@ -203,76 +203,58 @@
   }
 
   // ---------- Add / edit product ----------
-  async function addProduct(view, id) {
-    const [{ categories }, { brands }, existing] = await Promise.all([
-      window.api.get('/api/categories'),
-      window.api.get('/api/products/filters'),
-      id ? window.api.get(`/api/products/${id}`) : Promise.resolve(null),
-    ]);
-    const p = existing ? existing.product : null;
 
-    view.innerHTML = `
-      <div style="max-width:820px">
-        ${pageHead({
-    title: p ? 'Edit Product' : 'Add Product',
-    sub: `Enter these details once — they fill in automatically on every purchase and invoice. <span class="req">*</span> Required`,
-    back: { href: '#/inventory/products', label: 'Products' },
-  })}
-
-        ${p ? '' : `
-        <div class="card" id="scan-card">
-          <div class="card-head">
-            <div><h2>Have the supplier's bill?</h2>
-              <p>Upload one or several invoices and we'll read the products out of them — you check before anything is saved.</p></div>
-          </div>
-          <div class="pad">
-            <div class="form-grid">
-              <label class="full">Supplier invoices (PDF, Excel, CSV or text — several at once)
-                <input type="file" id="scan-files" multiple accept=".pdf,.csv,.txt,.tsv,.xlsx,.xls,image/*"></label>
-            </div>
-            <div class="btn-row" style="margin-top:12px"><button class="btn" id="scan-btn" type="button">Read invoices</button></div>
-            <div id="scan-status" style="margin-top:12px"></div>
-            <div id="scan-results"></div>
-          </div>
-        </div>`}
-
-        <form class="card" id="form">
+  /**
+   * The product form, shared by the Add Product page, the Services page and the
+   * "+ Add New Product" pop-up on the invoice screen. A service keeps the same
+   * record shape but has no brand, stock, shelf or serial numbers.
+   */
+  function productFormHtml(p, { categories, brands, service = false, name = '' }) {
+    const noun = service ? 'Service' : 'Product';
+    return `
+        <form class="card product-form" id="form">
+          <input type="hidden" name="item_type" value="${service ? 'SERVICE' : 'PRODUCT'}">
           <div class="form-section">
-            <span class="section-label">Product Information</span>
-            <label style="margin-bottom:18px">Product name <span class="req">*</span>
-              <input name="name" placeholder="e.g. Dell Inspiron 3530" value="${esc(p ? p.name : '')}" required>
+            <span class="section-label">${noun} Information</span>
+            <label style="margin-bottom:18px">${noun} name <span class="req">*</span>
+              <input name="name" placeholder="${service ? 'e.g. Windows installation' : 'e.g. Dell Inspiron 3530'}"
+                value="${esc(p ? p.name : name)}" required>
             </label>
             <div class="form-grid">
-              <label>Category <span class="req">*</span>
-                <select name="category" id="category" required>
+              <label>Category ${service ? '<span class="opt">(optional)</span>' : '<span class="req">*</span>'}
+                <select name="category" data-role="category" ${service ? '' : 'required'}>
                   <option value="">Choose a category</option>
                   ${categories.map((c) => `<option ${p && p.category === c.name ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
                   <option value="__new">+ New category…</option>
                 </select>
               </label>
+              ${service ? `<label class="full">Description <span class="opt">(optional)</span>
+                <input name="description" placeholder="What the job covers" value="${esc(p ? p.description || '' : '')}"></label>` : `
               <label>Brand
                 <input name="brand" list="brand-list" placeholder="e.g. Dell" value="${esc(p ? p.brand : '')}">
                 <datalist id="brand-list">${brands.map((b) => `<option value="${esc(b)}"></option>`).join('')}</datalist>
               </label>
               <label>Model <span class="opt">(optional)</span>
-                <input name="model" placeholder="e.g. 3530" value="${esc(p ? p.model : '')}"></label>
+                <input name="model" placeholder="e.g. 3530" value="${esc(p ? p.model : '')}"></label>`}
             </div>
           </div>
 
           <div class="form-section">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px">
               <span class="section-label">Tax &amp; Identification</span>
-              <span class="tag blue" id="auto-tax" hidden>✓ Filled from category — change if needed</span>
+              <span class="tag blue" data-role="auto-tax" hidden>✓ Filled from category — change if needed</span>
             </div>
             <div class="form-grid">
-              <label>HSN code <span class="req">*</span>
-                <input name="hsn_code" id="hsn" list="hsn-list" placeholder="e.g. 84713010" value="${esc(p ? p.hsn_code : '')}" required>
+              <label>${service ? 'SAC code' : 'HSN code'} ${service ? '<span class="opt">(optional)</span>' : '<span class="req">*</span>'}
+                <input name="hsn_code" data-role="hsn" list="hsn-list" placeholder="${service ? 'e.g. 998713' : 'e.g. 84713010'}"
+                  value="${esc(p ? p.hsn_code || '' : '')}" ${service ? '' : 'required'}>
                 <datalist id="hsn-list"></datalist>
               </label>
               <label>GST rate <span class="req">*</span>
-                <select name="gst_rate" id="gst">
+                <select name="gst_rate" data-role="gst">
                   ${[5, 12, 18, 28].map((r) => `<option value="${r}" ${p && Number(p.gst_rate) === r ? 'selected' : (!p && r === 18 ? 'selected' : '')}>${r}%</option>`).join('')}
                 </select>
+                <div class="hint">Billed as CGST + SGST, half each.</div>
               </label>
             </div>
           </div>
@@ -280,20 +262,20 @@
           <div class="form-section">
             <span class="section-label">Pricing</span>
             <div class="form-grid">
-              <label>Purchase price <span class="opt">(optional)</span>
+              <label>${service ? 'Cost to you' : 'Purchase price'} <span class="opt">(optional)</span>
                 <div class="money-field"><span>₹</span>
-                  <input name="purchase_price" id="buy" type="number" step="0.01" placeholder="45000" value="${p ? p.purchase_price : ''}"></div>
-                <div class="hint">Updates automatically from your latest purchase.</div>
+                  <input name="purchase_price" data-role="buy" type="number" step="0.01" placeholder="${service ? '0' : '45000'}" value="${p ? p.purchase_price : ''}"></div>
+                ${service ? '' : '<div class="hint">Updates automatically from your latest purchase.</div>'}
               </label>
-              <label>Selling price <span class="req">*</span>
+              <label>${service ? 'Service charge' : 'Selling price'} <span class="req">*</span>
                 <div class="money-field"><span>₹</span>
-                  <input name="selling_price" id="sell" type="number" step="0.01" placeholder="52000" value="${p ? p.selling_price : ''}" required></div>
-                <div class="hint good" id="margin" hidden></div>
+                  <input name="selling_price" data-role="sell" type="number" step="0.01" placeholder="${service ? '500' : '52000'}" value="${p ? p.selling_price : ''}" required></div>
+                <div class="hint good" data-role="margin" hidden></div>
               </label>
             </div>
           </div>
 
-          <div class="form-section">
+          ${service ? '' : `<div class="form-section">
             <span class="section-label">Inventory</span>
             <div class="form-grid" style="align-items:start">
               <label>Minimum stock
@@ -312,23 +294,25 @@
                   <span class="hint">Recommended for laptops, processors and monitors.</span></span>
               </label>
             </div>
-          </div>
-        </form>
+          </div>`}
+        </form>`;
+  }
 
-        <div class="btn-row end" style="margin-top:20px">
-          <a class="link-btn quiet" href="#/inventory/products">Cancel</a>
-          <button class="btn primary" id="save">${p ? 'Save Changes' : 'Save Product'}</button>
-        </div>
-        <datalist id="category-list">${categories.map((c) => `<option value="${esc(c.name)}"></option>`).join('')}</datalist>
-      </div>`;
+  /**
+   * Wire the product form inside root and return save(), which creates or
+   * updates the record and resolves to it, or to null when nothing was saved.
+   */
+  function wireProductForm(root, p, categories, { service = false } = {}) {
+    const form = root.querySelector('form.product-form');
+    const field = (role) => form.querySelector(`[data-role="${role}"]`);
 
     window.api.get('/api/hsn').then(({ hsn: codes }) => {
-      view.querySelector('#hsn-list').innerHTML = codes
+      form.querySelector('#hsn-list').innerHTML = codes
         .map((h) => `<option value="${esc(h.code)}">${esc(h.description || '')}</option>`).join('');
-    });
+    }).catch(() => {});
 
     // Choosing a category fills the tax fields — entered once, reused everywhere.
-    const categorySelect = view.querySelector('#category');
+    const categorySelect = field('category');
     categorySelect.addEventListener('change', async () => {
       if (categorySelect.value === '__new') {
         const name = await promptForCategory();
@@ -339,57 +323,202 @@
       }
       const chosen = categories.find((c) => c.name === categorySelect.value);
       if (chosen && chosen.hsn_code) {
-        view.querySelector('#hsn').value = chosen.hsn_code;
-        view.querySelector('#gst').value = String(chosen.gst_rate);
-        view.querySelector('#auto-tax').hidden = false;
+        field('hsn').value = chosen.hsn_code;
+        field('gst').value = String(chosen.gst_rate);
+        field('auto-tax').hidden = false;
       }
     });
 
     const showMargin = () => {
-      const buy = Number(view.querySelector('#buy').value);
-      const sell = Number(view.querySelector('#sell').value);
-      const hint = view.querySelector('#margin');
+      const buy = Number(field('buy').value);
+      const sell = Number(field('sell').value);
+      const hint = field('margin');
       hint.hidden = !(buy > 0 && sell > 0);
       if (!hint.hidden) hint.textContent = `Profit per unit: ${money(sell - buy)} (${((sell - buy) / buy * 100).toFixed(1)}%)`;
     };
-    ['#buy', '#sell'].forEach((s) => view.querySelector(s).addEventListener('input', showMargin));
+    [field('buy'), field('sell')].forEach((el) => el.addEventListener('input', showMargin));
     showMargin();
 
-    view.querySelector('#save').addEventListener('click', async () => {
-      const form = view.querySelector('#form');
+    const invalid = (input, message) => {
+      input.classList.add('invalid');
+      input.closest('label').insertAdjacentHTML('beforeend', `<div class="field-error">${esc(message)}</div>`);
+      input.focus();
+      return null;
+    };
+
+    return async function save() {
+      form.querySelectorAll('.field-error').forEach((el) => el.remove());
+      form.querySelectorAll('.invalid').forEach((el) => el.classList.remove('invalid'));
       const nameField = form.querySelector('[name=name]');
-      if (!nameField.value.trim()) {
-        nameField.classList.add('invalid');
-        nameField.insertAdjacentHTML('afterend', '<div class="field-error">Please enter a product name.</div>');
-        nameField.focus();
-        return;
-      }
+      if (!nameField.value.trim()) return invalid(nameField, `Please enter a ${service ? 'service' : 'product'} name.`);
+      if (!service && !categorySelect.value) return invalid(categorySelect, 'Please choose a category.');
+      if (!service && !field('hsn').value.trim()) return invalid(field('hsn'), 'Please enter the HSN code.');
+      if (field('sell').value === '') return invalid(field('sell'), 'Please enter the price.');
       const values = formValues(form);
       try {
-        if (p) {
-          await window.api.put(`/api/products/${p.id}`, values);
-          toast(`${values.name} saved.`);
-          window.location.hash = `#/inventory/product/${p.id}`;
-        } else {
-          const res = await window.api.post('/api/products', values);
-          toast(`${res.product.name} saved.`);
-          window.location.hash = `#/inventory/product/${res.product.id}`;
-        }
+        if (p) return (await window.api.put(`/api/products/${p.id}`, values)).product;
+        return (await window.api.post('/api/products', values)).product;
       } catch (err) {
         if (err.status === 409 && err.details && err.details.existingId) {
           const force = await confirm('Already in your list',
             `${values.name} already exists. Add it a second time anyway?`, 'Add anyway');
-          if (force) {
-            const res = await window.api.post('/api/products', { ...values, force: true });
-            window.location.hash = `#/inventory/product/${res.product.id}`;
-          }
-          return;
+          if (force) return (await window.api.post('/api/products', { ...values, force: true })).product;
+          return null;
         }
-        errorToast(err);
+        throw err;
       }
+    };
+  }
+
+  const formData = () => Promise.all([window.api.get('/api/categories'), window.api.get('/api/products/filters')])
+    .then(([{ categories }, { brands }]) => ({ categories, brands }));
+
+  /**
+   * Create a product (or service) in a pop-up without leaving the current
+   * screen; resolves to the saved record, or null if the pop-up is closed.
+   */
+  async function quickAddProduct(name = '', { service = false } = {}) {
+    if (!window.api.isAdmin()) {
+      toast(`Only the owner can add a new ${service ? 'service' : 'product'}. Ask them to add it.`, 'warn');
+      return null;
+    }
+    const { categories, brands } = await formData();
+    let save;
+    return modal({
+      title: service ? 'Add New Service' : 'Add New Product',
+      confirmLabel: service ? 'Save Service' : 'Save Product',
+      wide: true,
+      body: productFormHtml(null, { categories, brands, service, name }),
+      onRender: (root) => {
+        save = wireProductForm(root, null, categories, { service });
+        root.querySelector('[name=name]').focus();
+      },
+      onConfirm: async () => {
+        const product = await save();
+        if (!product) return undefined; // keep the pop-up open to fix the form
+        toast(`${product.name} saved.`, 'success');
+        return product;
+      },
+    });
+  }
+
+  async function addProduct(view, id, { service = false } = {}) {
+    const [{ categories, brands }, existing] = await Promise.all([
+      formData(),
+      id ? window.api.get(`/api/products/${id}`) : Promise.resolve(null),
+    ]);
+    const p = existing ? existing.product : null;
+    const isService = service || !!(p && p.item_type === 'SERVICE');
+    const back = isService
+      ? { href: '#/inventory/services', label: 'Services' }
+      : { href: '#/inventory/products', label: 'Products' };
+    const noun = isService ? 'Service' : 'Product';
+
+    view.innerHTML = `
+      <div style="max-width:820px">
+        ${pageHead({
+    title: p ? `Edit ${noun}` : `Add ${noun}`,
+    sub: isService
+      ? 'Services are billed on invoices like products, but never use stock. <span class="req">*</span> Required'
+      : 'Enter these details once — they fill in automatically on every purchase and invoice. <span class="req">*</span> Required',
+    back,
+  })}
+
+        ${p || isService ? '' : `
+        <div class="card" id="scan-card">
+          <div class="card-head">
+            <div><h2>Have the supplier's bill?</h2>
+              <p>Upload one or several invoices and we'll read the products out of them — you check before anything is saved.</p></div>
+          </div>
+          <div class="pad">
+            <div class="form-grid">
+              <label class="full">Supplier invoices (PDF, Excel, CSV or text — several at once)
+                <input type="file" id="scan-files" multiple accept=".pdf,.csv,.txt,.tsv,.xlsx,.xls,image/*"></label>
+            </div>
+            <div class="btn-row" style="margin-top:12px"><button class="btn" id="scan-btn" type="button">Read invoices</button></div>
+            <div id="scan-status" style="margin-top:12px"></div>
+            <div id="scan-results"></div>
+          </div>
+        </div>`}
+
+        ${productFormHtml(p, { categories, brands, service: isService })}
+
+        <div class="btn-row end" style="margin-top:20px">
+          <a class="link-btn quiet" href="${back.href}">Cancel</a>
+          <button class="btn primary" id="save">${p ? 'Save Changes' : `Save ${noun}`}</button>
+        </div>
+      </div>`;
+
+    const save = wireProductForm(view, p, categories, { service: isService });
+    view.querySelector('#save').addEventListener('click', async () => {
+      try {
+        const saved = await save();
+        if (!saved) return;
+        toast(`${saved.name} saved.`);
+        window.location.hash = isService ? '#/inventory/services' : `#/inventory/product/${saved.id}`;
+      } catch (err) { errorToast(err); }
     });
 
-    if (!p) setupInvoiceScan(view);
+    if (!p && !isService) setupInvoiceScan(view);
+  }
+
+  // ---------- Services ----------
+  async function services(view) {
+    const admin = window.api.isAdmin();
+    view.innerHTML = `
+      ${pageHead({
+    title: 'Services',
+    sub: 'Installation, repairs and other work you bill for. Services appear on invoices but never change stock.',
+    actions: admin ? '<a class="btn primary" href="#/inventory/add-service">+ Add Service</a>' : '',
+  })}
+      <div class="filters">${searchField('q', 'Search services…')}</div>
+      <div class="card" id="list">${skeleton(5)}</div>`;
+
+    const load = async () => {
+      const { products: rows } = await window.api.get('/api/products', {
+        q: view.querySelector('#q').value.trim(), type: 'SERVICE', limit: 300,
+      });
+      const list = view.querySelector('#list');
+      list.innerHTML = rows.length ? `${table(rows, [
+        {
+          label: 'Service',
+          render: (p) => `<div style="font-weight:500">${esc(p.name)}</div>
+            <div class="sub">${esc(p.product_code)}${p.description ? ` · ${esc(p.description)}` : ''}</div>`,
+        },
+        { label: 'SAC', num: true, render: (p) => esc(p.hsn_code || '—') },
+        { label: 'GST', num: true, render: (p) => `${Number(p.gst_rate)}%` },
+        { label: 'Charge', num: true, render: (p) => money(p.selling_price) },
+        ...(admin ? [{
+          label: '', noLabel: true,
+          render: () => moreMenu([
+            { label: 'Edit service', action: 'edit' },
+            { sep: true }, { label: 'Delete service', action: 'delete', danger: true },
+          ], '⋮'),
+        }] : []),
+      ], { rowAttrs: (p) => `data-id="${p.id}"${admin ? ` data-href="#/inventory/add-service/${p.id}"` : ''}` })}
+        <div class="table-foot"><span>Showing ${rows.length} service${rows.length === 1 ? '' : 's'}</span></div>`
+        : `<div class="empty"><h3>No services yet</h3>
+            <p>Add the work you charge for, such as installation or repairs, to bill it on invoices.</p></div>`;
+      wireLinks(list);
+      wireMenus(list, {
+        edit: (row) => { window.location.hash = `#/inventory/add-service/${row.dataset.id}`; },
+        delete: async (row) => {
+          const service = rows.find((p) => String(p.id) === row.dataset.id);
+          const ok = await confirm(`Delete ${service.name}?`,
+            'It will be removed from your services. Past invoices stay unchanged.', 'Delete Service', true);
+          if (!ok) return;
+          try {
+            await window.api.del(`/api/products/${service.id}`);
+            toast(`${service.name} deleted.`);
+            load();
+          } catch (err) { errorToast(err); }
+        },
+      });
+    };
+
+    let timer;
+    view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 220); });
+    await load();
   }
 
   const promptForCategory = () => modal({
@@ -1318,5 +1447,6 @@
   window.Pages = window.Pages || {};
   window.Pages.inventory = {
     overview, products, addProduct, addStock, movements, adjust, lowStock, serials, hsn, hsnDetail, productDetail,
+    services, addService: (view, id) => addProduct(view, id, { service: true }), quickAddProduct,
   };
 })();

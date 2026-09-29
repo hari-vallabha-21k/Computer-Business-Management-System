@@ -258,11 +258,14 @@ test('the invoice tax headers use the invoice’s own GST rate', () => {
   const { columns, sharedRate } = require('../server/lib/invoicedoc');
   assert.equal(sharedRate([{ gst_rate: 28 }, { gst_rate: 28 }]), 28);
   assert.equal(sharedRate([{ gst_rate: 12 }, { gst_rate: 18 }]), null);
-  const intra = columns(30, 535, false, 12).map((c) => c.label);
-  assert.ok(intra.includes('6% CGST\nAmount') && intra.includes('6% SGST\nAmount'));
-  const inter = columns(30, 535, true, 28).map((c) => c.label);
-  assert.ok(inter.includes('28% IGST\nAmount'));
-  const mixed = columns(30, 535, false, null).map((c) => c.label);
+  const twelve = columns(30, 535, 12).map((c) => c.label);
+  assert.ok(twelve.includes('CGST (6%)\nAmount') && twelve.includes('SGST (6%)\nAmount'));
+  const eighteen = columns(30, 535, 18);
+  assert.ok(eighteen.some((c) => c.label === 'CGST (9%)\nAmount'));
+  assert.ok(!eighteen.some((c) => /IGST/.test(c.label)), 'there is no IGST column');
+  const last = eighteen[eighteen.length - 1];
+  assert.ok(Math.abs(last.x + last.w - 565) < 0.01, 'the columns fill the printable width exactly');
+  const mixed = columns(30, 535, null).map((c) => c.label);
   assert.ok(mixed.includes('CGST\nAmount'), 'mixed rates name the tax without a wrong percentage');
 });
 

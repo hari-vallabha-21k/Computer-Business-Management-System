@@ -177,7 +177,7 @@ function findItems(text) {
 /** Best product-master matches for an extracted description (Section 10). */
 function matchProduct(description, hsn) {
   const products = db.prepare(`
-    SELECT p.*, h.code AS hsn_code FROM products p LEFT JOIN hsn_codes h ON h.id = p.hsn_id WHERE p.active = 1`).all();
+    SELECT p.*, h.code AS hsn_code FROM products p LEFT JOIN hsn_codes h ON h.id = p.hsn_id WHERE p.active = 1 AND p.item_type = 'PRODUCT'`).all();
   const FLOOR = 0.35;
   const scored = products.map((p) => {
     let score = similarity(description, `${p.name} ${p.brand} ${p.model}`);

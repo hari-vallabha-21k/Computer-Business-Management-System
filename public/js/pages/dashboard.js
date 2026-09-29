@@ -81,7 +81,9 @@
       {
         label: state.period === 'today' ? "Today's Sales" : `Sales · ${periodLabel}`,
         value: rupees(k.totalSales),
-        note: plural(k.invoices, 'invoice'),
+        note: k.serviceRevenue
+          ? `${plural(k.invoices, 'invoice')} · ${moneyShort(k.serviceRevenue)} services excl. GST`
+          : plural(k.invoices, 'invoice'),
         delta: change.revenue,
         href: '#/sales',
       },

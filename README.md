@@ -98,7 +98,7 @@ server/
   index.js            HTTP server, route wiring, error handling, first-admin bootstrap
   db.js               Schema, transactions, document numbering
   lib/inventory.js    The one place stock ever changes; writes the ledger
-  lib/gst.js          Line and invoice maths, GST-inclusive rates, CGST/SGST vs IGST
+  lib/gst.js          Line and invoice maths, GST-inclusive rates, CGST/SGST split
   lib/states.js       GST state codes -> place of supply
   lib/numberwords.js  Amount in words, Indian numbering
   lib/extract.js      Purchase-invoice reading and product matching
@@ -211,8 +211,14 @@ template), a rate of ₹55,500 x 2 prints as ₹1,11,000 incl GST, ₹94,067.80 
 GST is added on top. The setting lives in Settings → Pricing & Stock Rules and is recorded
 on each invoice, so old invoices keep the basis they were raised on.
 
-Tax splits CGST/SGST, or becomes IGST when the customer's GSTIN state code differs from the
-business's; *Place of Supply* is derived from the same code (`36` → `Telangana(36)`).
+Tax is always billed as CGST + SGST, each half of the line's GST rate (9% + 9% on an 18% item);
+IGST is not charged, and older invoices saved with IGST are shown split the same way.
+*Place of Supply* is derived from the customer's GSTIN state code (`36` → `Telangana(36)`).
+
+Services (installation, repairs, AMC) are kept under *Inventory → Services* and added to an
+invoice with *+ Add Service*. They are taxed and counted as revenue like products, printed with
+their SAC code, and never change stock. A product that is not in the list yet can be created
+from the invoice itself (*+ Add New Product* in the product search) without leaving the invoice.
 *Terms* such as "Net 30" set the due date automatically. The amount is written out in Indian
 numbering ("Rupees One Lakh Thirteen Thousand Only"). Invoices download as a generated PDF
 and print from the browser.

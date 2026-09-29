@@ -33,7 +33,11 @@
 
           <section class="card" style="margin:0">
             <div class="pad">
-              <div id="product-pick"></div>
+              <div class="item-pickers">
+                <div id="product-pick" class="grow"></div>
+                <button type="button" class="btn" id="add-service">+ Add Service</button>
+              </div>
+              <div id="service-pick" style="margin-top:12px" hidden></div>
             </div>
             <div id="lines" class="pad" style="padding-top:0"></div>
           </section>
@@ -69,7 +73,7 @@
             <div class="hint" id="price-mode" style="margin-bottom:12px"></div>
             <div id="stock-note"></div>
             <button class="btn primary block tall" id="issue">Issue Invoice</button>
-            <p class="hint center">Issuing reduces stock straight away.</p>
+            <p class="hint center">Issuing reduces stock for products straight away. Services don't use stock.</p>
             <div class="center"><button class="link-btn" id="save-draft">Save as draft</button></div>
           </div>
         </aside>
@@ -99,8 +103,27 @@
       renderTotals();
     }, { label: 'Customer' });
 
-    productSearch(view.querySelector('#product-pick'), (product) => addLine(product),
-      { label: 'Add product', placeholder: 'Search product, model or scan a barcode…' });
+    // "+ Add New Product" opens the product form in a pop-up; the new product
+    // lands straight on this invoice, so nothing typed here is lost.
+    productSearch(view.querySelector('#product-pick'), (product) => addLine(product), {
+      label: '+ Add Product',
+      placeholder: 'Search product, model or scan a barcode…',
+      onCreate: (text) => window.Pages.inventory.quickAddProduct(text),
+    });
+
+    const servicePick = view.querySelector('#service-pick');
+    const serviceInput = productSearch(servicePick, (service) => addLine(service), {
+      label: 'Service',
+      placeholder: 'Search services — installation, repair, AMC…',
+      type: 'SERVICE',
+      onCreate: (text) => window.Pages.inventory.quickAddProduct(text, { service: true }),
+    });
+    view.querySelector('#add-service').addEventListener('click', () => {
+      servicePick.hidden = false;
+      serviceInput.focus();
+    });
+
+    const isService = (product) => product.item_type === 'SERVICE';
 
     function addLine(product) {
       const existing = state.lines.find((l) => l.product.id === product.id);
@@ -112,36 +135,39 @@
     // Mirrors server/lib/gst.js: the rate either includes GST or has it added.
     const inclusive = () => !!(window.api.state.business && window.api.state.business.price_includes_gst);
 
+    const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
     function lineTotals(l) {
-      const gross = l.qty * l.unitPrice;
-      const net = Math.max(gross - l.discount, 0);
+      const gross = round2(l.qty * l.unitPrice);
+      const net = round2(Math.max(gross - l.discount, 0));
       const rate = Number(l.product.gst_rate) || 0;
       if (inclusive()) {
-        const taxable = net / (1 + rate / 100);
-        return { gross, taxable, gst: net - taxable, total: net };
+        const taxable = round2(net / (1 + rate / 100));
+        return { gross, taxable, gst: round2(net - taxable), total: net };
       }
-      const gst = net * rate / 100;
-      return { gross, taxable: net, gst, total: net + gst };
+      const gst = round2(net * rate / 100);
+      return { gross, taxable: net, gst, total: round2(net + gst) };
     }
 
     function renderLines() {
       const host = view.querySelector('#lines');
       if (!state.lines.length) {
-        host.innerHTML = '<div class="empty" style="padding:28px 8px"><h3>No products yet</h3>'
-          + '<p>Search above to add the first item.</p></div>';
+        host.innerHTML = '<div class="empty" style="padding:28px 8px"><h3>No products or services yet</h3>'
+          + '<p>Search above to add the first item, or use + Add Service.</p></div>';
         renderTotals();
         return;
       }
 
       host.innerHTML = `<div class="line-list">${state.lines.map((l, i) => {
     const totals = lineTotals(l);
-    const short = l.qty > l.product.stock;
+    const service = isService(l.product);
+    const short = !service && l.qty > l.product.stock;
     return `<div class="line-item">
           <div class="top">
             <div class="grow">
-              <div class="name">${esc(l.product.name)}</div>
-              <div class="meta">HSN ${esc(l.product.hsn_code || '—')} · GST ${l.product.gst_rate}%
-                · ${qty(l.product.stock)} in stock</div>
+              <div class="name">${esc(l.product.name)}${service ? ' <span class="tag blue">Service</span>' : ''}</div>
+              <div class="meta">${service ? 'SAC' : 'HSN'} ${esc(l.product.hsn_code || '—')} · GST ${l.product.gst_rate}%
+                (CGST ${l.product.gst_rate / 2}% + SGST ${l.product.gst_rate / 2}%)
+                · ${service ? 'no stock used' : `${qty(l.product.stock)} in stock`}</div>
             </div>
             <div class="stepper-input">
               <button type="button" data-step="-1" data-i="${i}" aria-label="Decrease">−</button>
@@ -239,27 +265,30 @@
         return acc;
       }, { subtotal: 0, discount: 0, gst: 0, total: 0 });
 
-      const business = window.api.state.business;
-      const interState = state.customer && state.customer.gstin && business && business.gstin
-        && state.customer.gstin.slice(0, 2) !== business.gstin.slice(0, 2);
-      const units = state.lines.reduce((sum, l) => sum + l.qty, 0);
+      // Same rounding as the server: each line to the paisa, CGST is half the
+      // GST and SGST the rest, so screen, saved invoice and PDF agree.
+      const gst = round2(totals.gst);
+      const cgst = round2(gst / 2);
+      const sgst = round2(gst - cgst);
+      const units = state.lines.filter((l) => !isService(l.product)).reduce((sum, l) => sum + l.qty, 0);
+      const services = state.lines.filter((l) => isService(l.product)).length;
+      const rates = [...new Set(state.lines.map((l) => Number(l.product.gst_rate)))];
+      const halfRate = rates.length === 1 ? ` (${rates[0] / 2}%)` : '';
 
       view.querySelector('#totals').innerHTML = `
-        <div class="line"><span class="muted">Subtotal · ${plural(units, 'item')}</span>
+        <div class="line"><span class="muted">Subtotal · ${plural(units, 'item')}${services ? ` + ${plural(services, 'service')}` : ''}</span>
           <span class="num">${money(totals.subtotal)}</span></div>
         ${totals.discount ? `<div class="line"><span class="muted">Discount</span>
           <span class="num">− ${money(totals.discount)}</span></div>` : ''}
-        ${interState
-    ? `<div class="line"><span class="muted">IGST</span><span class="num">${money(totals.gst)}</span></div>`
-    : `<div class="line"><span class="muted">CGST</span><span class="num">${money(totals.gst / 2)}</span></div>
-       <div class="line"><span class="muted">SGST</span><span class="num">${money(totals.gst / 2)}</span></div>`}
+        <div class="line"><span class="muted">CGST${halfRate}</span><span class="num">${money(cgst)}</span></div>
+        <div class="line"><span class="muted">SGST${halfRate}</span><span class="num">${money(sgst)}</span></div>
         <div class="total"><span>Total</span><span class="value">${rupees(totals.total)}</span></div>`;
 
       view.querySelector('#price-mode').textContent = inclusive()
         ? 'Rates include GST — the tax is backed out of the price.'
         : 'Rates exclude GST — the tax is added on top.';
 
-      const short = state.lines.filter((l) => l.qty > l.product.stock);
+      const short = state.lines.filter((l) => !isService(l.product) && l.qty > l.product.stock);
       view.querySelector('#stock-note').innerHTML = short.length
         ? `<div class="alert error" style="margin-bottom:12px"><span class="glyph">!</span>
              <div>${plural(short.length, 'line')} more than you have in stock.</div></div>` : '';
@@ -283,7 +312,7 @@
 
     /** Save the draft, attach serial selections, then optionally issue it. */
     async function save(issue) {
-      if (!state.lines.length) { toast('Add at least one product.', 'error'); return; }
+      if (!state.lines.length) { toast('Add at least one product or service.', 'error'); return; }
       try {
         const saved = state.invoiceId
           ? await window.api.put(`/api/invoices/${state.invoiceId}`, payload('DRAFT'))
@@ -441,11 +470,15 @@
     view.innerHTML = loading();
     const { invoice: inv, items, business } = await window.api.get(`/api/invoices/${id}`);
     const qr = await window.api.get(`/api/invoices/${id}/qr`).catch(() => ({ dataUrl: null }));
-    const interState = inv.igst > 0;
+    // Tax is shown as CGST + SGST, split exactly as the PDF splits it (SGST
+    // takes the odd paisa). Older invoices that stored IGST are split the same way.
+    const r2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
+    const split = (gst) => { const c = r2(Number(gst || 0) / 2); return [c, r2(Number(gst || 0) - c)]; };
+    const [cgstTotal, sgstTotal] = Number(inv.igst) > 0 ? split(inv.gst_amount || inv.igst) : [inv.cgst, inv.sgst];
     // Header percentages only when every line shares one rate, as on the PDF.
     const rates = [...new Set(items.map((it) => Number(it.gst_rate)))];
     const gstRate = rates.length === 1 ? rates[0] : null;
-    const pct = (v) => (v === null ? '' : `${v}% `);
+    const pct = (v) => (v === null ? '' : ` (${v}%)`);
     const halfRate = gstRate === null ? null : Math.round((gstRate / 2) * 100) / 100;
     const unitsTotal = items.reduce((s, it) => s + Number(it.qty), 0);
     const bankLines = [
@@ -520,41 +553,35 @@
           <table class="inv-items">
             <thead>
               <tr>
-                <th>#</th><th>Item &amp; Description</th><th>HSN</th>
+                <th>#</th><th>Item &amp; Description</th><th>HSN/SAC</th>
                 <th class="num">Qty</th><th class="num">Rate</th><th class="num">Total Incl GST</th>
                 <th class="num">Taxable Amount</th>
-                ${interState
-    ? `<th class="num">${pct(gstRate)}IGST<div class="small">Amount</div></th>`
-    : `<th class="num">${pct(halfRate)}CGST<div class="small">Amount</div></th>
-                   <th class="num">${pct(halfRate)}SGST<div class="small">Amount</div></th>`}
+                <th class="num">CGST${pct(halfRate)}<div class="small">Amount</div></th>
+                <th class="num">SGST${pct(halfRate)}<div class="small">Amount</div></th>
               </tr>
             </thead>
             <tbody>
               ${items.map((item, i) => `
                 <tr>
                   <td>${i + 1}</td>
-                  <td>${esc(item.description)}
+                  <td>${esc(item.description)}${item.item_type === 'SERVICE' ? ' <span class="tag blue">Service</span>' : ''}
                     ${item.serials && item.serials.length ? `<div class="small muted">S/N: ${esc(item.serials.join(', '))}</div>` : ''}</td>
                   <td>${esc(item.hsn_code || '-')}</td>
                   <td class="num">${qty(item.qty)}</td>
                   <td class="num">${money(item.unit_price)}</td>
                   <td class="num">${money(item.total)}</td>
                   <td class="num">${money(item.taxable_value)}</td>
-                  ${interState
-    ? `<td class="num">${money(item.gst_amount)}</td>`
-    : `<td class="num">${money(item.gst_amount / 2)}</td><td class="num">${money(item.gst_amount / 2)}</td>`}
+                  ${split(item.gst_amount).map((v) => `<td class="num">${money(v)}</td>`).join('')}
                 </tr>`).join('')}
               <tr class="inv-subtotal">
                 <td></td><td>Sub Total</td><td></td><td></td><td></td>
                 <td class="num">${money(inv.total)}</td>
                 <td class="num">${money(inv.subtotal)}</td>
-                ${interState
-    ? `<td class="num">${money(inv.igst)}</td>`
-    : `<td class="num">${money(inv.cgst)}</td><td class="num">${money(inv.sgst)}</td>`}
+                <td class="num">${money(cgstTotal)}</td><td class="num">${money(sgstTotal)}</td>
               </tr>
               <tr class="inv-grand">
                 <td></td><td>Items Total ${qty(unitsTotal)}</td>
-                <td colspan="${interState ? 4 : 5}"></td>
+                <td colspan="5"></td>
                 <td class="num">Total</td>
                 <td class="num"><strong>${money(inv.total)}</strong></td>
               </tr>

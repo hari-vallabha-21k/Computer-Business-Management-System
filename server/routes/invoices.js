@@ -20,7 +20,7 @@ function loadInvoice(id) {
     WHERE i.id = ?`).get(id);
   if (!invoice) throw new AppError('Invoice not found.', 404);
   const items = db.prepare(`
-    SELECT it.*, p.name AS product_name, p.product_code, p.serial_tracked
+    SELECT it.*, p.name AS product_name, p.product_code, p.serial_tracked, p.item_type
     FROM invoice_items it JOIN products p ON p.id = it.product_id
     WHERE it.invoice_id = ? ORDER BY it.id`).all(id);
   for (const item of items) {
@@ -32,7 +32,7 @@ function loadInvoice(id) {
 
 /** Build persisted line rows from the request payload, pulling defaults off the product master. */
 function buildLines(rawItems, priceIncludesGst) {
-  if (!Array.isArray(rawItems) || !rawItems.length) throw new AppError('Add at least one product to the invoice.', 422);
+  if (!Array.isArray(rawItems) || !rawItems.length) throw new AppError('Add at least one product or service to the invoice.', 422);
   return rawItems.map((raw) => {
     const product = db.prepare(`
       SELECT p.*, h.code AS hsn_code FROM products p LEFT JOIN hsn_codes h ON h.id = p.hsn_id WHERE p.id = ?`)
@@ -44,7 +44,9 @@ function buildLines(rawItems, priceIncludesGst) {
     const unitPrice = raw.unit_price === undefined ? product.selling_price : num(raw.unit_price);
     const gstRate = raw.gst_rate === undefined ? product.gst_rate : num(raw.gst_rate);
     const discount = num(raw.discount);
-    const serials = Array.isArray(raw.serials) ? raw.serials.map((s) => str(s)).filter(Boolean) : [];
+    // A service has no units on a shelf, so it never carries serial numbers.
+    const serials = !inv.isService(product) && Array.isArray(raw.serials)
+      ? raw.serials.map((s) => str(s)).filter(Boolean) : [];
     if (product.serial_tracked && serials.length && serials.length !== qty) {
       throw new AppError(`${product.name} needs exactly ${qty} serial number(s); ${serials.length} supplied.`, 422);
     }
@@ -71,8 +73,8 @@ function persistLines(invoiceId, lines) {
   });
 }
 
-function saveTotals(invoiceId, lines, customerGstin) {
-  const t = invoiceTotals(lines, { businessGstin: settings().gstin, customerGstin });
+function saveTotals(invoiceId, lines) {
+  const t = invoiceTotals(lines);
   db.prepare(`UPDATE invoices SET subtotal = ?, discount = ?, gst_amount = ?, cgst = ?, sgst = ?, igst = ?, total = ?
     WHERE id = ?`).run(t.subtotal, t.discount, t.gstAmount, t.cgst, t.sgst, t.igst, t.total, invoiceId);
   return t;
@@ -159,7 +161,7 @@ router.post('/', requirePermission('invoices'), wrap((req, res) => {
         str(b.ship_to_address) || (customer ? (customer.shipping_address || customer.address) : ''),
         str(b.product_brief), priceIncludesGst ? 1 : 0, req.user.id).lastInsertRowid);
     const saved = persistLines(invoiceId, lines);
-    saveTotals(invoiceId, saved, customer ? customer.gstin : '');
+    saveTotals(invoiceId, saved);
     
     // Handle initial payment
     const initialPayment = num(b.amount_paid);
@@ -204,7 +206,7 @@ router.put('/:id', requirePermission('invoices'), wrap((req, res) => {
         str(req.body.ship_to_address) || (customer ? (customer.shipping_address || customer.address) : ''),
         str(req.body.product_brief, existing.product_brief), priceIncludesGst ? 1 : 0, id);
     const saved = persistLines(id, lines);
-    saveTotals(id, saved, customer ? customer.gstin : '');
+    saveTotals(id, saved);
     
     // Update initial payment if provided during draft edit
     if (req.body.amount_paid !== undefined) {
@@ -225,7 +227,10 @@ router.put('/:id', requirePermission('invoices'), wrap((req, res) => {
 /**
  * Issue a draft: validates stock and serials, then reduces inventory.
  * Rule 2 of the business rules - the only path that consumes sale stock.
+ * Service lines count towards the bill and revenue but never touch stock.
  */
+const productOf = (item) => db.prepare('SELECT * FROM products WHERE id = ?').get(item.product_id);
+
 function issueInvoice(invoiceId, userId) {
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
   if (!invoice) throw new AppError('Invoice not found.', 404);
@@ -236,8 +241,9 @@ function issueInvoice(invoiceId, userId) {
   if (!items.length) throw new AppError('Cannot issue an invoice with no items.', 422);
   const allowNegative = !!settings().allow_negative_stock;
 
-  for (const item of items) {
-    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(item.product_id);
+  const stocked = items.filter((item) => !inv.isService(productOf(item)));
+  for (const item of stocked) {
+    const product = productOf(item);
     if (!allowNegative && product.stock < item.qty) {
       throw new AppError(
         `Insufficient stock for ${product.name}. Requested: ${item.qty}, Available: ${product.stock}. Reduce the quantity or add stock first.`,
@@ -255,7 +261,7 @@ function issueInvoice(invoiceId, userId) {
   }
 
   db.prepare("UPDATE invoices SET status = 'ISSUED', issued_at = datetime('now') WHERE id = ?").run(invoiceId);
-  for (const item of items) {
+  for (const item of stocked) {
     inv.move({
       productId: item.product_id, type: 'SALE', qty: item.qty, unitCost: item.cost_price,
       referenceType: 'INVOICE', referenceId: invoiceId, referenceNo: invoice.invoice_no, userId,
@@ -311,7 +317,8 @@ router.post('/:id/cancel', requirePermission('cancel'), wrap((req, res) => {
 
   const out = tx(() => {
     if (invoice.status === 'ISSUED') {
-      const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(id);
+      const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(id)
+        .filter((item) => !inv.isService(productOf(item)));
       for (const item of items) {
         inv.move({
           productId: item.product_id, type: 'CANCELLED_SALE', qty: item.qty, unitCost: item.cost_price,
