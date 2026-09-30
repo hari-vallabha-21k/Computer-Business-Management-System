@@ -4,6 +4,7 @@ const { db, tx } = require('../db');
 const { AppError, wrap, num, str, required, similarity, round2 } = require('../lib/util');
 const inventory = require('../lib/inventory');
 const { requireRole } = require('../lib/auth');
+const { can, hideCosts } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -80,7 +81,7 @@ router.get('/', wrap((req, res) => {
 
   const sql = `${SELECT}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY p.name LIMIT ?`;
   params.push(num(req.query.limit, 200));
-  res.json({ products: db.prepare(sql).all(...params) });
+  res.json({ products: hideCosts(req.user, db.prepare(sql).all(...params)) });
 }));
 
 // GET /api/products/filters - distinct values for dashboard/report filters
@@ -101,7 +102,7 @@ router.post('/match', wrap((req, res) => {
     .filter((m) => m.score > 0.3)
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
-  res.json({ matches: scored });
+  res.json({ matches: scored.map((m) => ({ ...m, product: hideCosts(req.user, m.product) })) });
 }));
 
 /**
@@ -153,7 +154,16 @@ router.get('/:id', wrap((req, res) => {
     lastSupplier: purchases.length ? purchases[0].supplier_name : null,
     serialsAvailable: serials.filter((s2) => s2.status === 'AVAILABLE').length,
   };
-  res.json({ product, movements, serials, sales, purchases, stats, ledgerStock: inventory.ledgerStock(product.id) });
+  res.json({
+    product: hideCosts(req.user, product),
+    movements: hideCosts(req.user, movements),
+    serials,
+    sales,
+    // The purchase history is nothing but supplier prices.
+    purchases: can(req.user, 'costs') ? purchases : [],
+    stats: hideCosts(req.user, stats),
+    ledgerStock: inventory.ledgerStock(product.id),
+  });
 }));
 
 router.post('/', requireRole('ADMIN'), wrap((req, res) => {
@@ -256,7 +266,7 @@ router.put('/:id', requireRole('ADMIN'), wrap((req, res) => {
       service || b.serial_tracked === undefined ? current.serial_tracked : (b.serial_tracked ? 1 : 0),
       str(b.barcode, current.barcode), str(b.description, current.description),
       str(b.location, current.location), b.active === undefined ? current.active : (b.active ? 1 : 0), id);
-  res.json({ product: db.prepare(`${SELECT} WHERE p.id = ?`).get(id) });
+  res.json({ product: hideCosts(req.user, db.prepare(`${SELECT} WHERE p.id = ?`).get(id)) });
 }));
 
 // Products are deactivated, never deleted, so history stays intact.

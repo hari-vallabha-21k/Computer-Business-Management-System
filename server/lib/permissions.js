@@ -44,13 +44,33 @@ function can(user, key) {
   return staffPermissions()[key] === true;
 }
 
-/** Express gate for a single permission. */
+/** Express gate for a single permission. An unknown key is owner-only. */
 function requirePermission(key) {
   return (req, res, next) => {
     if (!req.user) return next(new AppError('Please sign in to continue.', 401));
     if (can(req.user, key)) return next();
-    next(new AppError(`Sales staff are not allowed to ${PERMISSIONS[key][0].toLowerCase()}. Ask the owner to turn this on in Settings.`, 403));
+    const action = PERMISSIONS[key] ? PERMISSIONS[key][0].toLowerCase() : 'do this';
+    next(new AppError(`Sales staff are not allowed to ${action}. Ask the owner to turn this on in Settings.`, 403));
   };
+}
+
+/**
+ * Purchase prices and margins are the owner's business unless the `costs`
+ * switch is on, so they are removed from what goes back over the wire rather
+ * than only hidden by the screens.
+ */
+const COST_FIELDS = ['purchase_price', 'cost_price', 'unit_cost', 'stock_value',
+  'stockValue', 'lastPurchasePrice'];
+
+function hideCosts(user, value, fields = COST_FIELDS) {
+  if (can(user, 'costs')) return value;
+  const scrub = (row) => {
+    if (!row || typeof row !== 'object') return row;
+    const out = { ...row };
+    for (const field of fields) delete out[field];
+    return out;
+  };
+  return Array.isArray(value) ? value.map(scrub) : scrub(value);
 }
 
 /** The list the settings screen renders. */
@@ -59,4 +79,6 @@ const describe = () => {
   return Object.entries(PERMISSIONS).map(([key, [label, desc]]) => ({ key, label, description: desc, allowed: current[key] }));
 };
 
-module.exports = { PERMISSIONS, DEFAULTS, staffPermissions, savePermissions, can, requirePermission, describe };
+module.exports = {
+  PERMISSIONS, DEFAULTS, staffPermissions, savePermissions, can, requirePermission, hideCosts, describe,
+};

@@ -39,10 +39,20 @@ password-holder in **Settings → Users** before using this with real data.
 | `PORT` | `3000` | HTTP port |
 | `DATA_DIR` | `./data` | Database and uploads directory |
 | `DB_FILE` | `./data/cbms.db` | SQLite database file |
-| `SESSION_SECRET` | dev value | HMAC key for session tokens — **set this in production** |
+| `SESSION_SECRET` | random per run | HMAC key for session tokens — **required in production** |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `owner@example.com` / `owner123` | First admin on an empty database |
 
 Requires Node.js 22.13 or newer (it uses the built-in `node:sqlite`).
+
+### Before going live
+
+Set `SESSION_SECRET` to a long random string (`openssl rand -hex 32`) and keep it out of the
+repository. With `NODE_ENV=production` the server refuses to start without it, because anyone who
+could guess the key could forge an owner login. Without `NODE_ENV=production` a fresh random key is
+made for each run, so everyone is signed out whenever the server restarts.
+
+Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` too, before the first start: they create the first owner
+account on an empty database, and the defaults above are public knowledge.
 
 ## Running the Project Locally
 

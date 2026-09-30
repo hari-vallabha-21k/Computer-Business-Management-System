@@ -12,7 +12,7 @@ const { requireRole } = require('../lib/auth');
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
-router.get('/', wrap((req, res) => {
+router.get('/', requirePermission('costs'), wrap((req, res) => {
   const where = [];
   const params = [];
   if (req.query.supplierId) { where.push('p.supplier_id = ?'); params.push(Number(req.query.supplierId)); }
@@ -32,7 +32,7 @@ router.get('/', wrap((req, res) => {
   res.json({ purchases: db.prepare(sql).all(...params) });
 }));
 
-router.get('/:id', wrap((req, res) => {
+router.get('/:id', requirePermission('costs'), wrap((req, res) => {
   const purchase = db.prepare(`
     SELECT p.*, s.name AS supplier_name, s.gstin AS supplier_gstin, u.name AS created_by_name
     FROM purchases p LEFT JOIN suppliers s ON s.id = p.supplier_id LEFT JOIN users u ON u.id = p.created_by

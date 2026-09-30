@@ -2,12 +2,15 @@
 const express = require('express');
 const { db, tx, nextNumber, settings } = require('../db');
 const { AppError, wrap, num, str, required, round2, today } = require('../lib/util');
-const { requirePermission, can } = require('../lib/permissions');
+const { requirePermission, can, hideCosts } = require('../lib/permissions');
 const inv = require('../lib/inventory');
 const { lineTotals, invoiceTotals } = require('../lib/gst');
 const { placeOfSupply, stateCode } = require('../lib/states');
 
 const router = express.Router();
+
+/** What cost price a line was bought at is the owner's business, not the counter's. */
+const visible = (user, out) => ({ ...out, items: hideCosts(user, out.items) });
 
 function loadInvoice(id) {
   const invoice = db.prepare(`
@@ -60,8 +63,35 @@ function buildLines(rawItems, priceIncludesGst) {
   });
 }
 
+/** Reserve serials against a draft line, refusing any already spoken for. */
+function reserveSerials(invoiceId, itemId, productId, serials) {
+  inv.assertSerialsAvailable(productId, serials, { invoiceId });
+  const claim = db.prepare('UPDATE serial_numbers SET invoice_item_id = ? WHERE serial = ?');
+  for (const serial of serials) claim.run(itemId, serial);
+}
+
+/**
+ * Replace an invoice's lines.
+ *
+ * Serial reservations point at invoice_items, so they are released before the
+ * old rows go and re-attached to the new ones afterwards; without that, saving
+ * a draft that has serials chosen fails on the foreign key, which left such a
+ * draft impossible to edit or issue. Serials come from the payload when it
+ * supplies them, otherwise the ones already reserved for that product are kept.
+ */
 function persistLines(invoiceId, lines) {
+  const previous = new Map();
+  for (const row of db.prepare(`
+    SELECT s.serial, it.product_id FROM serial_numbers s
+    JOIN invoice_items it ON it.id = s.invoice_item_id
+    WHERE it.invoice_id = ? ORDER BY s.id`).all(invoiceId)) {
+    if (!previous.has(row.product_id)) previous.set(row.product_id, []);
+    previous.get(row.product_id).push(row.serial);
+  }
+  db.prepare(`UPDATE serial_numbers SET invoice_item_id = NULL
+    WHERE invoice_item_id IN (SELECT id FROM invoice_items WHERE invoice_id = ?)`).run(invoiceId);
   db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(invoiceId);
+
   const insert = db.prepare(`
     INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit_price, discount,
       gst_rate, gst_amount, taxable_value, total, cost_price)
@@ -69,7 +99,10 @@ function persistLines(invoiceId, lines) {
   return lines.map((l) => {
     const id = Number(insert.run(invoiceId, l.product.id, l.description, l.hsnCode, l.qty, l.unitPrice,
       l.discount, l.gstRate, l.gstAmount, l.taxable, l.total, l.product.purchase_price).lastInsertRowid);
-    return { ...l, itemId: id };
+    const carried = previous.get(l.product.id) || [];
+    const serials = l.serials.length ? l.serials : carried.splice(0, Math.round(l.qty));
+    if (serials.length) reserveSerials(invoiceId, id, l.product.id, serials);
+    return { ...l, itemId: id, serials };
   });
 }
 
@@ -101,7 +134,7 @@ router.get('/', wrap((req, res) => {
 
 router.get('/:id', wrap((req, res) => {
   const { invoice, items } = loadInvoice(Number(req.params.id));
-  res.json({ invoice, items, business: settings() });
+  res.json({ invoice, items: hideCosts(req.user, items), business: settings() });
 }));
 
 /** Due date = invoice date + n days; blank terms mean payment on receipt. */
@@ -174,7 +207,7 @@ router.post('/', requirePermission('invoices'), wrap((req, res) => {
     if (status === 'ISSUED') issueInvoice(invoiceId, req.user.id);
     return loadInvoice(invoiceId);
   });
-  res.status(201).json(out);
+  res.status(201).json(visible(req.user, out));
 }));
 
 // PUT /api/invoices/:id - drafts only
@@ -221,7 +254,7 @@ router.put('/:id', requirePermission('invoices'), wrap((req, res) => {
 
     return loadInvoice(id);
   });
-  res.json(out);
+  res.json(visible(req.user, out));
 }));
 
 /**
@@ -230,6 +263,15 @@ router.put('/:id', requirePermission('invoices'), wrap((req, res) => {
  * Service lines count towards the bill and revenue but never touch stock.
  */
 const productOf = (item) => db.prepare('SELECT * FROM products WHERE id = ?').get(item.product_id);
+
+/** Serials already reserved against a line, and free ones left for it to take. */
+function serialCounts(item, productId) {
+  return {
+    chosen: db.prepare('SELECT COUNT(*) AS n FROM serial_numbers WHERE invoice_item_id = ?').get(item.id).n,
+    spare: db.prepare(`SELECT COUNT(*) AS n FROM serial_numbers
+      WHERE product_id = ? AND status = 'AVAILABLE' AND invoice_item_id IS NULL`).get(productId).n,
+  };
+}
 
 function issueInvoice(invoiceId, userId) {
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
@@ -249,19 +291,33 @@ function issueInvoice(invoiceId, userId) {
         `Insufficient stock for ${product.name}. Requested: ${item.qty}, Available: ${product.stock}. Reduce the quantity or add stock first.`,
         409, { productId: product.id, requested: item.qty, available: product.stock });
     }
-    const serials = db.prepare('SELECT serial FROM serial_numbers WHERE invoice_item_id = ?').all(item.id)
-      .map((r) => r.serial);
     if (product.serial_tracked) {
-      const available = db.prepare("SELECT COUNT(*) AS n FROM serial_numbers WHERE product_id = ? AND status = 'AVAILABLE'")
-        .get(product.id).n;
-      if (!serials.length && available < item.qty && !allowNegative) {
-        throw new AppError(`${product.name} is serial tracked and only ${available} serial number(s) are available.`, 409);
+      const { chosen, spare } = serialCounts(item, product.id);
+      if (chosen + spare < item.qty && !allowNegative) {
+        throw new AppError(
+          `${product.name} is serial tracked and only ${chosen + spare} serial number(s) are available for this line.`, 409);
       }
     }
   }
 
   db.prepare("UPDATE invoices SET status = 'ISSUED', issued_at = datetime('now') WHERE id = ?").run(invoiceId);
   for (const item of stocked) {
+    const product = productOf(item);
+    // A serial-tracked line hands over specific units. Anything the user did
+    // not pick is filled from the oldest unclaimed serials, so the serial
+    // records always account for the stock that left the shelf.
+    if (product.serial_tracked) {
+      const { chosen } = serialCounts(item, product.id);
+      const missing = Math.round(item.qty) - chosen;
+      if (missing > 0) {
+        const spare = db.prepare(`SELECT id FROM serial_numbers
+          WHERE product_id = ? AND status = 'AVAILABLE' AND invoice_item_id IS NULL
+          ORDER BY id LIMIT ?`).all(product.id, missing);
+        for (const row of spare) {
+          db.prepare('UPDATE serial_numbers SET invoice_item_id = ? WHERE id = ?').run(item.id, row.id);
+        }
+      }
+    }
     inv.move({
       productId: item.product_id, type: 'SALE', qty: item.qty, unitCost: item.cost_price,
       referenceType: 'INVOICE', referenceId: invoiceId, referenceNo: invoice.invoice_no, userId,
@@ -281,7 +337,7 @@ router.post('/:id/issue', requirePermission('invoices'), wrap((req, res) => {
     issueInvoice(id, req.user.id);
     return loadInvoice(id);
   });
-  res.json(out);
+  res.json(visible(req.user, out));
 }));
 
 // POST /api/invoices/:id/serials - reserve serial numbers against a draft line
@@ -298,10 +354,7 @@ router.post('/:id/serials', requirePermission('invoices'), wrap((req, res) => {
 
   tx(() => {
     db.prepare('UPDATE serial_numbers SET invoice_item_id = NULL WHERE invoice_item_id = ?').run(itemId);
-    inv.assertSerialsAvailable(item.product_id, serials);
-    for (const serial of serials) {
-      db.prepare('UPDATE serial_numbers SET invoice_item_id = ? WHERE serial = ?').run(itemId, serial);
-    }
+    reserveSerials(id, itemId, item.product_id, serials);
   });
   res.json({ ok: true, serials });
 }));
@@ -333,7 +386,7 @@ router.post('/:id/cancel', requirePermission('cancel'), wrap((req, res) => {
       .run(str(req.body.reason), id);
     return loadInvoice(id);
   });
-  res.json(out);
+  res.json(visible(req.user, out));
 }));
 
 router.delete('/:id', requirePermission('invoices'), wrap((req, res) => {

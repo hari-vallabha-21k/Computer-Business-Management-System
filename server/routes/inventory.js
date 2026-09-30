@@ -4,7 +4,7 @@ const { db, tx, nextNumber, settings } = require('../db');
 const { AppError, wrap, num, str, required, round2 } = require('../lib/util');
 const inv = require('../lib/inventory');
 const { requireRole } = require('../lib/auth');
-const { requirePermission } = require('../lib/permissions');
+const { requirePermission, hideCosts } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -24,7 +24,7 @@ router.get('/movements', wrap((req, res) => {
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY t.id DESC LIMIT ?`;
   params.push(num(req.query.limit, 200));
-  res.json({ movements: db.prepare(sql).all(...params) });
+  res.json({ movements: hideCosts(req.user, db.prepare(sql).all(...params)) });
 }));
 
 // GET /api/inventory/low-stock
@@ -125,11 +125,21 @@ router.post('/adjust', requireRole('ADMIN'), wrap((req, res) => {
       referenceType: 'ADJUSTMENT', referenceNo: adjNo, reason,
       note: str(b.note), userId: req.user.id,
     });
-    if (Array.isArray(b.serials) && b.serials.length) {
-      for (const serial of b.serials) {
-        db.prepare("UPDATE serial_numbers SET status = ?, note = ? WHERE serial = ?")
-          .run(qty < 0 ? 'DAMAGED' : 'AVAILABLE', reason, str(serial));
+    // A stock count only speaks for its own product, and a unit that has
+    // already been sold belongs to an invoice: put that right by cancelling
+    // the invoice or recording a return, not by counting the shelf.
+    for (const raw of (Array.isArray(b.serials) ? b.serials : [])) {
+      const serial = str(raw);
+      if (!serial) continue;
+      const row = db.prepare('SELECT * FROM serial_numbers WHERE serial = ?').get(serial);
+      if (!row || row.product_id !== productId) {
+        throw new AppError(`Serial number ${serial} does not belong to ${product.name}.`, 422);
       }
+      if (row.status === 'SOLD') {
+        throw new AppError(`Serial number ${serial} has been sold. Cancel the invoice or record a return instead.`, 409);
+      }
+      db.prepare('UPDATE serial_numbers SET status = ?, note = ? WHERE id = ?')
+        .run(qty < 0 ? 'DAMAGED' : 'AVAILABLE', reason, row.id);
     }
     if (Math.abs(qty) >= 5) {
       db.prepare(`INSERT INTO notifications (level, type, message, link)

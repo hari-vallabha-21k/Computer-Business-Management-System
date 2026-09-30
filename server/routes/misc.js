@@ -75,9 +75,26 @@ users.delete('/:id', requireRole('ADMIN'), wrap((req, res) => {
   const id = Number(req.params.id);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!user) throw new AppError('User not found.', 404);
+  if (req.user.id === id) throw new AppError('You cannot delete the account you are signed in with.', 409);
   if (user.role === 'ADMIN') {
     const admins = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'ADMIN'").get().n;
     if (admins <= 1) throw new AppError('The last admin cannot be deleted.', 409);
+  }
+  // Every invoice, bill and stock movement records who did it. Deleting
+  // someone who appears in the books would break that trail - the database
+  // refuses it too - so say so plainly and point at switching them off.
+  const history = db.prepare(`SELECT
+      (SELECT COUNT(*) FROM invoices WHERE created_by = ?)
+    + (SELECT COUNT(*) FROM purchases WHERE created_by = ?)
+    + (SELECT COUNT(*) FROM purchases WHERE checked_by = ?)
+    + (SELECT COUNT(*) FROM sales_returns WHERE created_by = ?)
+    + (SELECT COUNT(*) FROM invoice_payments WHERE created_by = ?)
+    + (SELECT COUNT(*) FROM inventory_transactions WHERE user_id = ?) AS n`)
+    .get(id, id, id, id, id, id).n;
+  if (history) {
+    throw new AppError(
+      `${user.name} has ${history} record(s) in the books and cannot be deleted. `
+      + 'Switch the account off instead, so the history stays intact.', 409);
   }
   db.prepare('DELETE FROM users WHERE id = ?').run(id);
   res.json({ ok: true });

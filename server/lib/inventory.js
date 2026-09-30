@@ -69,12 +69,25 @@ function ledgerStock(productId) {
   return round2(row.total);
 }
 
-function assertSerialsAvailable(productId, serials) {
+/**
+ * Check that every serial can be sold on this invoice: in stock, on this
+ * product, and not already reserved by someone else's draft. Without that
+ * last check two drafts could claim the same unit, the second quietly taking
+ * it, and the first would then be issued with no serial against it.
+ */
+function assertSerialsAvailable(productId, serials, { invoiceId = null } = {}) {
   for (const serial of serials) {
     const row = db.prepare('SELECT * FROM serial_numbers WHERE serial = ?').get(serial);
     if (!row) throw new AppError(`Serial number ${serial} is not in stock.`, 422);
     if (row.product_id !== productId) throw new AppError(`Serial number ${serial} belongs to a different product.`, 422);
     if (row.status !== 'AVAILABLE') throw new AppError(`Serial number ${serial} is not available (status: ${row.status}).`, 409);
+    if (row.invoice_item_id) {
+      const holder = db.prepare(`SELECT i.id, i.invoice_no FROM invoice_items it
+        JOIN invoices i ON i.id = it.invoice_id WHERE it.id = ?`).get(row.invoice_item_id);
+      if (holder && holder.id !== invoiceId) {
+        throw new AppError(`Serial number ${serial} is already reserved on draft invoice ${holder.invoice_no}.`, 409);
+      }
+    }
   }
 }
 

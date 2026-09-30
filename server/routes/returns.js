@@ -3,6 +3,7 @@ const express = require('express');
 const { db, tx, nextNumber, settings } = require('../db');
 const { AppError, wrap, num, str, required, round2, today } = require('../lib/util');
 const inv = require('../lib/inventory');
+const { requirePermission, can } = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -40,7 +41,7 @@ router.get('/invoice/:invoiceNo', wrap((req, res) => {
 }));
 
 // POST /api/returns - restores inventory (Rule 3)
-router.post('/', wrap((req, res) => {
+router.post('/', requirePermission('invoices'), wrap((req, res) => {
   const b = req.body;
   required(b, ['invoice_id', 'items']);
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(Number(b.invoice_id));
@@ -49,6 +50,25 @@ router.post('/', wrap((req, res) => {
   const lines = (Array.isArray(b.items) ? b.items : []).filter((l) => num(l.qty) > 0);
   if (!lines.length) throw new AppError('Select at least one item and quantity to return.', 422);
   const restock = b.restock === false ? 0 : 1;
+
+  // Sending back every remaining line refunds the invoice in full and puts
+  // the stock back - the same outcome as cancelling it - so it needs the
+  // same permission. Partial returns stay part of the normal counter job.
+  const asked = new Map();
+  for (const line of lines) {
+    const itemId = Number(line.invoice_item_id);
+    asked.set(itemId, round2((asked.get(itemId) || 0) + num(line.qty)));
+  }
+  const outstanding = db.prepare('SELECT id, qty, returned_qty FROM invoice_items WHERE invoice_id = ?')
+    .all(invoice.id);
+  const wholeInvoice = outstanding.every((item) => {
+    const left = round2(item.qty - item.returned_qty);
+    return left <= 0 || (asked.get(item.id) || 0) >= left;
+  });
+  if (wholeInvoice && !can(req.user, 'cancel')) {
+    throw new AppError('Returning the whole invoice undoes the sale, so it needs the "Cancel invoices" '
+      + 'permission. Ask the owner to turn this on in Settings, or return only the items coming back.', 403);
+  }
 
   const out = tx(() => {
     const returnNo = nextNumber(settings().return_prefix || 'RET', 1001);

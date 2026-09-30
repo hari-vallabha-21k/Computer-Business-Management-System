@@ -121,7 +121,7 @@ function partyRouter(table) {
     res.json({ record: db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id) });
   }));
 
-  router.delete('/:id', wrap((req, res) => {
+  router.delete('/:id', requireRole('ADMIN'), wrap((req, res) => {
     const id = Number(req.params.id);
     const linked = isCustomer
       ? db.prepare('SELECT COUNT(*) AS n FROM invoices WHERE customer_id = ?').get(id).n
