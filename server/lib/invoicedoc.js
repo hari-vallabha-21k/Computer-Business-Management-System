@@ -13,6 +13,7 @@ const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
 const { settings } = require('../db');
 const { round2 } = require('./util');
+const { splitGst, sumSplit } = require('./gst');
 const { rupeesInWords } = require('./numberwords');
 
 const amount = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -86,19 +87,14 @@ function sharedRate(items) {
   return rates.length === 1 ? rates[0] : null;
 }
 
-/** A GST amount split into its CGST and SGST halves; SGST takes the odd paisa. */
-function splitGst(gst) {
-  const cgst = round2(Number(gst || 0) / 2);
-  return [cgst, round2(Number(gst || 0) - cgst)];
-}
-
 /**
- * Invoice-level CGST and SGST. Invoices saved before IGST was retired carry
- * their tax in the igst column; it is shown split the same way.
+ * Invoice CGST and SGST for the Sub Total row: the sum of the lines' own
+ * splits, so the columns always add up. Worked out from the lines rather than
+ * read from the invoice, so invoices saved earlier (including ones that
+ * stored IGST) print consistently too.
  */
-function invoiceTaxSplit(invoice) {
-  if (Number(invoice.igst) > 0) return splitGst(invoice.gst_amount || invoice.igst);
-  return [round2(invoice.cgst), round2(invoice.sgst)];
+function invoiceTaxSplit(items) {
+  return sumSplit(items.map((i) => i.gst_amount));
 }
 
 /** What the Product Brief block prints: the typed brief, then any serial numbers sold. */
@@ -277,7 +273,7 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   }
 
   currentY = ensure(currentY, rowH * 2);
-  const [cgstTotal, sgstTotal] = invoiceTaxSplit(invoice);
+  const [cgstTotal, sgstTotal] = invoiceTaxSplit(items);
 
   // Sub Total row
   doc.font('Times-Bold').fontSize(9);

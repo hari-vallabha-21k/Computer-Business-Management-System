@@ -133,12 +133,42 @@ test('odd-paisa GST splits into CGST and SGST that add back exactly', async () =
   const product = await makeProduct({ selling_price: 100.01, opening_stock: 5 });
   const { invoice } = (await api('POST', '/api/invoices', { items: [{ product_id: product.id, qty: 1 }] }, 'admin')).body;
   assert.equal(Math.round((invoice.cgst + invoice.sgst) * 100) / 100, invoice.gst_amount);
-  const { splitGst, invoiceTaxSplit } = require('../server/lib/invoicedoc');
-  assert.deepEqual(splitGst(15.27), [7.64, 7.63]);
-  assert.deepEqual(invoiceTaxSplit({ igst: 1800, gst_amount: 1800, cgst: 0, sgst: 0 }), [900, 900],
+  const { splitGst } = require('../server/lib/gst');
+  const { invoiceTaxSplit } = require('../server/lib/invoicedoc');
+  assert.deepEqual(splitGst(15.27), [7.64, 7.63], 'the odd paisa goes to CGST');
+  assert.deepEqual(invoiceTaxSplit([{ gst_amount: 1800 }]), [900, 900],
     'an invoice saved with IGST before the change is shown as CGST + SGST');
 });
 
 test('the PDF keeps at least eight item rows', () => {
   assert.equal(require('../server/lib/invoicedoc').MIN_ROWS, 8);
+});
+
+test('CGST and SGST columns add up to the Sub Total row (two lines of 1.01 GST each)', async () => {
+  // GST-exclusive so each line's GST is exactly 1.01: 5.61 x 18% = 1.0098 -> 1.01.
+  await api('PUT', '/api/settings', { price_includes_gst: false }, 'admin');
+  try {
+    const product = await makeProduct({ selling_price: 5.61, opening_stock: 5 });
+    const res = await api('POST', '/api/invoices', {
+      items: [{ product_id: product.id, qty: 1 }, { product_id: product.id, qty: 1, unit_price: 5.61 }],
+    }, 'admin');
+    const { invoice, items } = res.body;
+    assert.deepEqual(items.map((i) => i.gst_amount), [1.01, 1.01]);
+
+    const { splitGst } = require('../server/lib/gst');
+    const rows = items.map((i) => splitGst(i.gst_amount));
+    assert.deepEqual(rows, [[0.51, 0.5], [0.51, 0.5]]);
+    assert.equal(invoice.cgst, 1.02, 'saved CGST is the sum of the CGST column');
+    assert.equal(invoice.sgst, 1.0, 'saved SGST is the sum of the SGST column');
+    assert.equal(Math.round((invoice.cgst + invoice.sgst) * 100) / 100, invoice.gst_amount);
+
+    const { invoiceTaxSplit } = require('../server/lib/invoicedoc');
+    assert.deepEqual(invoiceTaxSplit(items), [1.02, 1.0], 'the PDF Sub Total row matches the columns');
+
+    const pdf = await fetch(url(`/api/invoices/${invoice.id}/pdf`), { headers: { authorization: `Bearer ${tokens.admin}` } });
+    const text = await require('../server/lib/extract').pdfText(Buffer.from(await pdf.arrayBuffer()));
+    assert.ok(text.includes('1.02') && text.includes('0.51') && text.includes('0.50'));
+  } finally {
+    await api('PUT', '/api/settings', { price_includes_gst: true }, 'admin');
+  }
 });

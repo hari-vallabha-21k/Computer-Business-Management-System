@@ -136,6 +136,7 @@
     const inclusive = () => !!(window.api.state.business && window.api.state.business.price_includes_gst);
 
     const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+    const splitGst = (g) => { const c = round2(Number(g || 0) / 2); return [c, round2(Number(g || 0) - c)]; };
     function lineTotals(l) {
       const gross = round2(l.qty * l.unitPrice);
       const net = round2(Math.max(gross - l.discount, 0));
@@ -265,11 +266,12 @@
         return acc;
       }, { subtotal: 0, discount: 0, gst: 0, total: 0 });
 
-      // Same rounding as the server: each line to the paisa, CGST is half the
-      // GST and SGST the rest, so screen, saved invoice and PDF agree.
-      const gst = round2(totals.gst);
-      const cgst = round2(gst / 2);
-      const sgst = round2(gst - cgst);
+      // Same rule as the server: each line's GST splits into CGST (half, taking
+      // any odd paisa) and SGST (the rest), and the totals add those halves up,
+      // so screen, saved invoice and PDF agree to the paisa.
+      const halves = state.lines.map((l) => splitGst(lineTotals(l).gst));
+      const cgst = round2(halves.reduce((sum, [c]) => sum + c, 0));
+      const sgst = round2(halves.reduce((sum, [, sg]) => sum + sg, 0));
       const units = state.lines.filter((l) => !isService(l.product)).reduce((sum, l) => sum + l.qty, 0);
       const services = state.lines.filter((l) => isService(l.product)).length;
       const rates = [...new Set(state.lines.map((l) => Number(l.product.gst_rate)))];
@@ -470,11 +472,15 @@
     view.innerHTML = loading();
     const { invoice: inv, items, business } = await window.api.get(`/api/invoices/${id}`);
     const qr = await window.api.get(`/api/invoices/${id}/qr`).catch(() => ({ dataUrl: null }));
-    // Tax is shown as CGST + SGST, split exactly as the PDF splits it (SGST
-    // takes the odd paisa). Older invoices that stored IGST are split the same way.
+    // Tax is shown as CGST + SGST, split exactly as the PDF splits it: each
+    // line's GST halves (CGST takes any odd paisa) and the Sub Total adds those
+    // halves up, so the columns always sum to it. Older invoices, including
+    // ones that stored IGST, are worked out from their lines the same way.
     const r2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
     const split = (gst) => { const c = r2(Number(gst || 0) / 2); return [c, r2(Number(gst || 0) - c)]; };
-    const [cgstTotal, sgstTotal] = Number(inv.igst) > 0 ? split(inv.gst_amount || inv.igst) : [inv.cgst, inv.sgst];
+    const halves = items.map((it) => split(it.gst_amount));
+    const cgstTotal = r2(halves.reduce((sum, [c]) => sum + c, 0));
+    const sgstTotal = r2(halves.reduce((sum, [, sg]) => sum + sg, 0));
     // Header percentages only when every line shares one rate, as on the PDF.
     const rates = [...new Set(items.map((it) => Number(it.gst_rate)))];
     const gstRate = rates.length === 1 ? rates[0] : null;
