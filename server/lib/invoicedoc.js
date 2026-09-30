@@ -139,7 +139,7 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   let y = left;
 
   // ---- Seller header: logo on the left, name/address/GSTIN centred ----
-  const logoW = 96;
+  const logoW = 140;
   const titleH = 18;
   const nameW = width - logoW - 8;
   const contact = [business.phone, business.email].filter(Boolean).join('  |  ');
@@ -147,7 +147,7 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
     + (business.address ? heightOf(business.address, 'Times-Roman', 10, nameW) + 2 : 0)
     + (contact ? heightOf(contact, 'Times-Roman', 9, nameW) + 2 : 0)
     + (business.gstin ? 15 : 0);
-  const headerH = Math.max(92, Math.ceil(sellerH) + titleH + 12);
+  const headerH = Math.max(120, Math.ceil(sellerH) + titleH + 12);
   // The seller block sits centred in the space above the TAX INVOICE strip.
   const sellerTop = y + Math.max(6, (headerH - titleH - sellerH) / 2);
   box(left, y, width, headerH);
@@ -267,9 +267,55 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
     box(left, currentY, width, h);
     cols.forEach((c, ci) => {
       if (ci) vLine(c.x, currentY, h);
-      if (cells.length) text(cells[ci], c.x + 2, currentY + 4, { width: c.w - 4, align: c.align });
+      if (cells.length) {
+        if (ci === 0) doc.font('Times-Bold');
+        text(cells[ci], c.x + 2, currentY + 4, { width: c.w - 4, align: c.align });
+        if (ci === 0) doc.font('Times-Roman');
+      }
     });
     currentY += h;
+  }
+
+  const qr = await qrDataUrl(invoice, business, baseUrl);
+  const splitX = left + width * 0.6;
+  const qrSize = 120;
+  const bankW = splitX - left - qrSize - 14;
+
+  const words = rupeesInWords(invoice.total);
+  const wordsH = Math.ceil(heightOf(words, 'Times-Bold', 10, width - 6)) + 17;
+
+  const bankLinesCalc = [
+    business.bank_account_name ? `Account Name : ${business.bank_account_name}` : '',
+    business.bank_account_no ? `A/c No             : ${business.bank_account_no}` : '',
+    business.bank_branch_ifsc ? `Br & IFSC        : ${business.bank_branch_ifsc}` : '',
+    !business.bank_account_name && !business.bank_account_no && business.bank_details ? business.bank_details : '',
+  ].filter(Boolean);
+  const bankTextHCalc = 16 + bankLinesCalc.reduce((sum, line) => sum + heightOf(line, 'Times-Roman', 9, bankW) + 2, 0);
+  const bankHCalc = Math.ceil(Math.max(bankTextHCalc, qr.dataUrl ? qrSize + 16 : 0, 76));
+
+  const termsCalc = business.terms
+    ? business.terms.split('\n').map((t) => t.trim()).filter(Boolean).map((t, i) => `${i + 1}. ${t.replace(/^\d+\.\s*/, '')}`)
+    : ['1. Goods warranty covers asper the manufacturer terms',
+      '2. Physical damage of product must be checked on arrival.',
+      '3. warranty does not cover upon electric burning'];
+  const declarationCalc = business.declaration
+    || 'We declare that this invoice shows the actual charges of the Services described and that all particulars are true and correct.';
+  const termsHCalc = 13 + termsCalc.reduce((sum, t) => sum + heightOf(t, 'Times-Roman', 8, width - 6), 0) + 3;
+  const declHCalc = 12 + heightOf(declarationCalc, 'Times-Roman', 7, width - 6) + 4;
+  const footerHCalc = Math.ceil(termsHCalc + declHCalc);
+
+  const briefStr = briefText(invoice, items);
+  const briefHCalc = briefStr ? Math.ceil(heightOf(briefStr, 'Times-Italic', 8, width - 6)) + 20 : 0;
+
+  const trailingH = rowH * 2 + briefHCalc + wordsH + bankHCalc + footerHCalc;
+
+  if (currentY + trailingH < PAGE_BOTTOM) {
+    const pad = PAGE_BOTTOM - (currentY + trailingH);
+    box(left, currentY, width, pad);
+    cols.forEach((c, ci) => {
+      if (ci) vLine(c.x, currentY, pad);
+    });
+    currentY += pad;
   }
 
   currentY = ensure(currentY, rowH * 2);
@@ -298,22 +344,42 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   y = currentY + rowH;
 
   // ---- Product brief: only when there is something to say, as tall as it needs ----
-  const brief = briefText(invoice, items);
+  const brief = briefStr;
   if (brief) {
-    const briefH = Math.ceil(heightOf(brief, 'Times-Italic', 8, width - 6)) + 20;
+    const briefH = briefHCalc;
     y = ensure(y, briefH);
     box(left, y, width, briefH);
     doc.font('Times-Bold').fontSize(9);
     text('Product Brief :', left + 3, y + 3);
     doc.moveTo(left + 3, y + 13).lineTo(left + 60, y + 13).lineWidth(0.5).strokeColor(LINE).stroke();
-    doc.font('Times-Italic').fontSize(8);
-    text(brief, left + 3, y + 16, { width: width - 6 });
+    if (invoice.product_brief) {
+      doc.font('Times-Italic').fontSize(8);
+      text(brief, left + 3, y + 16, { width: width - 6 });
+    } else {
+      let isFirst = true;
+      items.forEach((item, i) => {
+        const sold = item.serials && item.serials.length ? ` ST:${item.serials.join(', ')}` : '';
+        const numStr = isFirst ? `${i + 1}. ` : ` ${i + 1}. `;
+        const isLast = i === items.length - 1;
+        const descStr = isLast ? `${item.description}${sold}` : `${item.description}${sold}.`;
+        
+        doc.font('Times-Bold').fontSize(8);
+        if (isFirst) {
+          text(numStr, left + 3, y + 16, { width: width - 6, continued: true });
+        } else {
+          text(numStr, { continued: true });
+        }
+        
+        doc.font('Times-Italic').fontSize(8);
+        text(descStr, { continued: !isLast });
+        
+        isFirst = false;
+      });
+    }
     y += briefH;
   }
 
   // ---- Amount in words ----
-  const words = rupeesInWords(invoice.total);
-  const wordsH = Math.ceil(heightOf(words, 'Times-Bold', 10, width - 6)) + 17;
   y = ensure(y, wordsH);
   box(left, y, width, wordsH);
   doc.font('Times-Roman').fontSize(9);
@@ -323,18 +389,8 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   y += wordsH;
 
   // ---- Bank details and QR code | signatory ----
-  const splitX = left + width * 0.6;
-  const qrSize = 84;
-  const bankW = splitX - left - qrSize - 14;
-  const bankLines = [
-    business.bank_account_name ? `Account Name : ${business.bank_account_name}` : '',
-    business.bank_account_no ? `A/c No             : ${business.bank_account_no}` : '',
-    business.bank_branch_ifsc ? `Br & IFSC        : ${business.bank_branch_ifsc}` : '',
-    !business.bank_account_name && !business.bank_account_no && business.bank_details ? business.bank_details : '',
-  ].filter(Boolean);
-  const qr = await qrDataUrl(invoice, business, baseUrl);
-  const bankTextH = 16 + bankLines.reduce((sum, line) => sum + heightOf(line, 'Times-Roman', 9, bankW) + 2, 0);
-  const bankH = Math.ceil(Math.max(bankTextH, qr.dataUrl ? qrSize + 16 : 0, 76));
+  const bankLines = bankLinesCalc;
+  const bankH = bankHCalc;
   y = ensure(y, bankH);
   box(left, y, width, bankH);
   vLine(splitX, y, bankH);
@@ -359,16 +415,10 @@ async function renderInvoicePdf(res, { invoice, items, business = settings(), ba
   y += bankH;
 
   // ---- Terms and declaration, sized to their text ----
-  const terms = business.terms
-    ? business.terms.split('\n').map((t) => t.trim()).filter(Boolean).map((t, i) => `${i + 1}. ${t.replace(/^\d+\.\s*/, '')}`)
-    : ['1. Goods warranty covers asper the manufacturer terms',
-      '2. Physical damage of product must be checked on arrival.',
-      '3. warranty does not cover upon electric burning'];
-  const declaration = business.declaration
-    || 'We declare that this invoice shows the actual charges of the Services described and that all particulars are true and correct.';
-  const termsH = 13 + terms.reduce((sum, t) => sum + heightOf(t, 'Times-Roman', 8, width - 6), 0) + 3;
-  const declH = 12 + heightOf(declaration, 'Times-Roman', 7, width - 6) + 4;
-  const footerH = Math.ceil(termsH + declH);
+  const terms = termsCalc;
+  const declaration = declarationCalc;
+  const termsH = termsHCalc;
+  const footerH = footerHCalc;
   y = ensure(y, footerH);
   box(left, y, width, footerH);
   hLine(y + termsH);

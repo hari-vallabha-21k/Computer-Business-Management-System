@@ -245,9 +245,9 @@
               <span class="tag blue" data-role="auto-tax" hidden>✓ Filled from category — change if needed</span>
             </div>
             <div class="form-grid">
-              <label>${service ? 'SAC code' : 'HSN code'} ${service ? '<span class="opt">(optional)</span>' : '<span class="req">*</span>'}
+              <label>HSN/SAC code <span class="req">*</span>
                 <input name="hsn_code" data-role="hsn" list="hsn-list" placeholder="${service ? 'e.g. 998713' : 'e.g. 84713010'}"
-                  value="${esc(p ? p.hsn_code || '' : '')}" ${service ? '' : 'required'}>
+                  value="${esc(p ? p.hsn_code || '' : '')}" required>
                 <datalist id="hsn-list"></datalist>
               </label>
               <label>GST rate <span class="req">*</span>
@@ -352,7 +352,7 @@
       const nameField = form.querySelector('[name=name]');
       if (!nameField.value.trim()) return invalid(nameField, `Please enter a ${service ? 'service' : 'product'} name.`);
       if (!service && !categorySelect.value) return invalid(categorySelect, 'Please choose a category.');
-      if (!service && !field('hsn').value.trim()) return invalid(field('hsn'), 'Please enter the HSN code.');
+      if (!field('hsn').value.trim()) return invalid(field('hsn'), 'Please enter the HSN/SAC code.');
       if (field('sell').value === '') return invalid(field('sell'), 'Please enter the price.');
       const values = formValues(form);
       try {

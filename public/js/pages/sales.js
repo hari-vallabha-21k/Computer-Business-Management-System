@@ -166,7 +166,7 @@
           <div class="top">
             <div class="grow">
               <div class="name">${esc(l.product.name)}${service ? ' <span class="tag blue">Service</span>' : ''}</div>
-              <div class="meta">${service ? 'SAC' : 'HSN'} ${esc(l.product.hsn_code || '—')} · GST ${l.product.gst_rate}%
+              <div class="meta">HSN/SAC ${esc(l.product.hsn_code || '—')} · GST ${l.product.gst_rate}%
                 (CGST ${l.product.gst_rate / 2}% + SGST ${l.product.gst_rate / 2}%)
                 · ${service ? 'no stock used' : `${qty(l.product.stock)} in stock`}</div>
             </div>
