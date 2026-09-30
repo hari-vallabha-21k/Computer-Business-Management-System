@@ -104,6 +104,15 @@
     ];
 
     body.innerHTML = `
+      <section style="margin-bottom:24px">
+        <h2 style="margin-bottom:12px">Quick Actions</h2>
+        <div class="btn-row">
+          <a class="btn primary tall" href="#/sales/create">+ Create Invoice</a>
+          <a href="#/inventory/add-stock">+ Add Stock</a>
+          ${admin ? '<a href="#/inventory/add-product">+ Add Product</a>' : ''}
+        </div>
+      </section>
+
       ${tiles(metrics)}
       <div class="grid cols-2">
         <section class="card">
@@ -145,18 +154,14 @@
     { label: 'Invoice', class: 'doc', render: (r) => esc(r.invoice_no) },
     { label: 'Customer', render: (r) => esc(r.customer_name || 'Walk-in') },
     { label: 'Amount', num: true, render: (r) => rupees(r.total) },
+    { label: 'Due', num: true, render: (r) => { 
+        if (r.payment_status === 'PAID') return '<span class="muted">—</span>';
+        const due = Math.max(0, r.total - (r.amount_paid || 0)); 
+        return due > 0 ? `<span style="color:var(--red-text)">${rupees(due)}</span>` : '<span class="muted">—</span>'; 
+    } },
     { label: 'Date', render: (r) => `<span class="muted">${date(r.invoice_date)}</span>` },
   ], { rowAttrs: (r) => `data-href="#/sales/invoice/${r.id}"` })
     : '<div class="empty"><h3>No invoices yet</h3><p>Your invoices will appear here.</p></div>'}
-      </section>
-
-      <section>
-        <h2 style="margin-bottom:12px">Quick Actions</h2>
-        <div class="btn-row">
-          <a class="btn primary tall" href="#/sales/create">+ Create Invoice</a>
-          <a href="#/inventory/add-stock">+ Add Stock</a>
-          ${admin ? '<a href="#/inventory/add-product">+ Add Product</a>' : ''}
-        </div>
       </section>`;
 
     wireLinks(body);

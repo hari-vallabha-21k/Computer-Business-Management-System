@@ -244,6 +244,7 @@ router.put('/:id', requireRole('ADMIN'), wrap((req, res) => {
   const b = req.body;
   const categoryId = b.category !== undefined ? resolveCategory(b.category) : current.category_id;
   const hsn = b.hsn_code !== undefined ? resolveHsn(b.hsn_code, b.gst_rate) : null;
+  const hsnIdToSet = b.hsn_code !== undefined ? (hsn ? hsn.id : null) : current.hsn_id;
   const service = current.item_type === 'SERVICE';
   db.prepare(`
     UPDATE products SET name = ?, category_id = ?, brand = ?, model = ?, hsn_id = ?, gst_rate = ?,
@@ -251,7 +252,7 @@ router.put('/:id', requireRole('ADMIN'), wrap((req, res) => {
       location = ?, active = ?
     WHERE id = ?`)
     .run(str(b.name, current.name) || current.name, categoryId, str(b.brand, current.brand), str(b.model, current.model),
-      hsn ? hsn.id : current.hsn_id, num(b.gst_rate, current.gst_rate), num(b.purchase_price, current.purchase_price),
+      hsnIdToSet, num(b.gst_rate, current.gst_rate), num(b.purchase_price, current.purchase_price),
       num(b.selling_price, current.selling_price), service ? 0 : num(b.min_stock, current.min_stock),
       service || b.serial_tracked === undefined ? current.serial_tracked : (b.serial_tracked ? 1 : 0),
       str(b.barcode, current.barcode), str(b.description, current.description),
