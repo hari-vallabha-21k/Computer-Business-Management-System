@@ -123,7 +123,13 @@
   }
 
   async function route() {
-    const view = document.getElementById('view');
+    // Every visit gets a fresh view element. A page still waiting on the
+    // server when the next one starts keeps writing to the old element, which
+    // is no longer in the document, so a slow page can never paint over the
+    // one the user has already moved on to.
+    const previous = document.getElementById('view');
+    const view = previous.cloneNode(false);
+    previous.replaceWith(view);
     // "?product=5" carries context for the page; it is not part of the route.
     const path = (window.location.hash || '#/').slice(1).split('?')[0] || '/';
     renderNav();
