@@ -244,14 +244,25 @@
 
   /**
    * Type-ahead product search box. Calls onSelect(product).
-   * Used by invoicing, add stock and adjustments so products are searched, never typed.
-   * options.type 'SERVICE' searches services instead of goods. options.onCreate(text),
-   * when given, offers "+ Add New Product" for a search with no match; it resolves
-   * to the created record (or null), which is then selected like any other.
+   * Used by invoicing, add stock, adjustments and supplier bills, so a product
+   * is always searched, never typed.
+   *
+   * A search with no match is never a dead end: wherever the signed-in user is
+   * allowed to create products, the box offers "+ Add New Product" there and
+   * then, opens the product form over the page, and selects whatever it saved.
+   * options.type 'SERVICE' searches services instead of goods;
+   * options.createOptions is passed on to the form (for instance to leave out
+   * opening stock on a screen that is about to book stock in anyway).
    */
   function productSearch(container, onSelect, options = {}) {
     const service = options.type === 'SERVICE';
     const noun = service ? 'service' : 'product';
+    const Noun = service ? 'Service' : 'Product';
+    const creator = () => (window.Pages && window.Pages.inventory && window.Pages.inventory.quickAddProduct);
+    const canCreate = () => !!(window.api.isAdmin() && creator());
+    const create = (text) => (options.onCreate
+      ? options.onCreate(text)
+      : creator()(text, { service, ...(options.createOptions || {}) }));
     container.innerHTML = `
       <label>${esc(options.label || 'Product')}
         <input type="search" placeholder="${esc(options.placeholder || 'Search by name, brand, model, ID, HSN or serial…')}" autocomplete="off">
@@ -269,14 +280,14 @@
 
     const render = (products) => {
       const typed = input.value.trim();
-      if (!products.length && options.onCreate) {
+      if (!products.length) {
         list.innerHTML = `<div class="item muted">No ${noun} matches “${esc(typed)}”.</div>
-          <div class="item" data-new="1"><strong>+ Add New ${service ? 'Service' : 'Product'}</strong>
-            <span class="small muted">&nbsp;“${esc(typed)}”</span></div>`;
-      } else if (!products.length) {
-        list.innerHTML = service
-          ? '<div class="item muted">No matching service. Add it from Inventory → Services.</div>'
-          : '<div class="item muted">No matching product. Add it from Inventory → Add Product.</div>';
+          ${canCreate()
+    ? `<div class="item add-new" data-new="1">
+         <strong>+ Add New ${Noun}</strong>
+         <span class="small muted">&nbsp;Create “${esc(typed)}” without leaving this page</span>
+       </div>`
+    : `<div class="item muted">Ask the owner to add this ${noun}.</div>`}`;
       } else {
         list.innerHTML = products.map((p) => `
           <div class="item" data-id="${p.id}">
@@ -299,7 +310,7 @@
       if (add) {
         add.addEventListener('click', async () => {
           list.hidden = true;
-          const created = await options.onCreate(typed);
+          const created = await create(typed);
           if (created) choose(created);
         });
       }

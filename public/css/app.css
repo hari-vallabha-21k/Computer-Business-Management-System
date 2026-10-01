@@ -182,6 +182,9 @@ a:hover { color: var(--primary-dark); text-decoration: underline; }
   display: flex; gap: 12px; align-items: center; padding: 10px 16px; cursor: pointer; font-size: 15px;
 }
 .search-results .item:hover, .pick-list .item:hover, .pick-list .item.active { background: var(--paper); }
+/* "+ Add New Product" reads as the action it is, not as another result. */
+.pick-list .item.add-new { border-top: 1px solid var(--rule); color: var(--primary); }
+.pick-list .item.add-new:hover { background: var(--primary-soft); }
 
 .badge {
   min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--red);

@@ -185,7 +185,7 @@
    * "+ Add New Product" pop-up on the invoice screen. A service keeps the same
    * record shape but has no brand, stock, shelf or serial numbers.
    */
-  function productFormHtml(p, { categories, brands, service = false, name = '' }) {
+  function productFormHtml(p, { categories, brands, service = false, name = '', openingStock = true }) {
     const noun = service ? 'Service' : 'Product';
     return `
         <form class="card product-form" id="form">
@@ -261,7 +261,7 @@
               <label>Shelf location <span class="opt">(optional)</span>
                 <input name="location" placeholder="e.g. Display shelf A" value="${esc(p ? p.location || '' : '')}">
               </label>
-              ${p ? '' : `<label>Opening stock <span class="opt">(optional)</span>
+              ${p || !openingStock ? '' : `<label>Opening stock <span class="opt">(optional)</span>
                 <input name="opening_stock" type="number" step="1" value="0">
                 <div class="hint">What you already have on the shelf today.</div></label>`}
               <label class="check boxed" style="margin-top:24px">
@@ -353,7 +353,7 @@
    * Create a product (or service) in a pop-up without leaving the current
    * screen; resolves to the saved record, or null if the pop-up is closed.
    */
-  async function quickAddProduct(name = '', { service = false } = {}) {
+  async function quickAddProduct(name = '', { service = false, openingStock = true } = {}) {
     if (!window.api.isAdmin()) {
       toast(`Only the owner can add a new ${service ? 'service' : 'product'}. Ask them to add it.`, 'warn');
       return null;
@@ -364,7 +364,7 @@
       title: service ? 'Add New Service' : 'Add New Product',
       confirmLabel: service ? 'Save Service' : 'Save Product',
       wide: true,
-      body: productFormHtml(null, { categories, brands, service, name }),
+      body: productFormHtml(null, { categories, brands, service, name, openingStock }),
       onRender: (root) => {
         save = wireProductForm(root, null, categories, { service });
         root.querySelector('[name=name]').focus();
@@ -618,7 +618,8 @@
         } catch { /* the hint is a nicety */ }
       };
 
-      productSearch(flow.querySelector('#product-pick'), choose, { label: 'Product' });
+      productSearch(flow.querySelector('#product-pick'), choose,
+        { label: 'Product', createOptions: { openingStock: false } });
       partySearch(flow.querySelector('#supplier-pick'), 'suppliers', (s) => { supplierId = s.id; },
         { label: 'Supplier (optional)' });
       if (preset) window.api.get(`/api/products/${preset}`).then(({ product }) => choose(product)).catch(() => {});
@@ -759,7 +760,8 @@
       view.querySelector('#submit').disabled = false;
       refreshDiff();
     };
-    productSearch(view.querySelector('#product-pick'), choose, { label: 'Product' });
+    productSearch(view.querySelector('#product-pick'), choose,
+      { label: 'Product', createOptions: { openingStock: false } });
     physical.addEventListener('input', refreshDiff);
     if (preset) window.api.get(`/api/products/${preset}`).then(({ product }) => choose(product)).catch(() => {});
 

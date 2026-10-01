@@ -103,12 +103,11 @@
       renderTotals();
     }, { label: 'Customer' });
 
-    // "+ Add New Product" opens the product form in a pop-up; the new product
-    // lands straight on this invoice, so nothing typed here is lost.
+    // A product the shop has never sold before can be created from the search
+    // box itself; it lands straight on this invoice, so nothing typed is lost.
     productSearch(view.querySelector('#product-pick'), (product) => addLine(product), {
       label: '+ Add Product',
       placeholder: 'Search product, model or scan a barcode…',
-      onCreate: (text) => window.Pages.inventory.quickAddProduct(text),
     });
 
     const servicePick = view.querySelector('#service-pick');
@@ -116,7 +115,6 @@
       label: 'Service',
       placeholder: 'Search services — installation, repair, AMC…',
       type: 'SERVICE',
-      onCreate: (text) => window.Pages.inventory.quickAddProduct(text, { service: true }),
     });
     view.querySelector('#add-service').addEventListener('click', () => {
       servicePick.hidden = false;

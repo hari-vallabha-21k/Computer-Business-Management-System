@@ -274,7 +274,8 @@
           <p class="muted small" style="margin-top:10px">Or leave it unmatched to create a new product when you confirm.</p>
           <button class="btn" id="make-new">Create as new product</button>`,
         onRender: (root, close) => {
-          productSearch(root.querySelector('#rematch-pick'), (product) => close(product), { keepText: true });
+          productSearch(root.querySelector('#rematch-pick'), (product) => close(product),
+            { keepText: true, createOptions: { openingStock: false } });
           root.querySelector('#make-new').addEventListener('click', () => close('new'));
         },
       });
