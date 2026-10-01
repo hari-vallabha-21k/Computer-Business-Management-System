@@ -251,8 +251,9 @@
    * allowed to create products, the box offers "+ Add New Product" there and
    * then, opens the product form over the page, and selects whatever it saved.
    * options.type 'SERVICE' searches services instead of goods;
-   * options.createOptions is passed on to the form (for instance to leave out
-   * opening stock on a screen that is about to book stock in anyway).
+   * options.createOptions is passed on to the form (for instance stockNote,
+   * to say how the quantity this screen asks for relates to the one typed
+   * into the form).
    */
   function productSearch(container, onSelect, options = {}) {
     const service = options.type === 'SERVICE';

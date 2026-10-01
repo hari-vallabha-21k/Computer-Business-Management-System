@@ -266,6 +266,7 @@ function seed() {
 
   db.prepare('DELETE FROM notifications').run();
   console.log('Seeded demo data.');
+  console.log('  DEMO DATA - every table was emptied first. Never run this on a real shop.');
   console.log('  Owner : owner@example.com / owner123');
   console.log('  Staff : staff@example.com / staff123');
 }

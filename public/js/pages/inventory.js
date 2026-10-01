@@ -351,6 +351,10 @@
   const ADDING_STOCK_NOTE = 'How many you already have on the shelf. '
     + 'The quantity you enter on this page is added on top.';
 
+  /** Correcting the count sets the figure outright, so nothing is added. */
+  const COUNTING_STOCK_NOTE = 'How many you already have on the shelf. '
+    + 'The physical count you enter on this page replaces it.';
+
   const formData = () => Promise.all([window.api.get('/api/categories'), window.api.get('/api/products/filters')])
     .then(([{ categories }, { brands }]) => ({ categories, brands }));
 
@@ -766,7 +770,7 @@
       refreshDiff();
     };
     productSearch(view.querySelector('#product-pick'), choose,
-      { label: 'Product', createOptions: { stockNote: ADDING_STOCK_NOTE } });
+      { label: 'Product', createOptions: { stockNote: COUNTING_STOCK_NOTE } });
     physical.addEventListener('input', refreshDiff);
     if (preset) window.api.get(`/api/products/${preset}`).then(({ product }) => choose(product)).catch(() => {});
 

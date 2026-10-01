@@ -111,29 +111,49 @@
    * knowing; the two would drift apart. The browser's own back button still
    * works, and lands on the same place.
    */
-  const trail = [];
+  let trail = [];
 
-  function rememberVisit(path, title) {
+  /**
+   * Nothing of the last person's session survives into the next sign-in:
+   * not where they had been, and not the poll that keeps asking the server
+   * for their notifications.
+   */
+  function endSession() {
+    trail = [];
+    clearInterval(window.__cbmsPoll);
+  }
+
+  /**
+   * `where` is the whole address including anything after "?", because
+   * "#/inventory/add?product=7" and the bare page are different places and
+   * going back to the first must not land on the second.
+   */
+  function rememberVisit(where, title) {
+    // The Dashboard is home: arriving there starts the trail again, so the
+    // Hub never offers to go "back" into the page you just left it from.
+    if (where === '/') { trail = [{ where, title }]; return; }
     const last = trail[trail.length - 1];
-    if (last && last.path === path) { last.title = title; return; }
+    if (last && last.where === where) { last.title = title; return; }
     // Returning to the page before this one closes the loop instead of
     // stacking, so going back and forth cannot grow the trail for ever.
-    if (trail.length > 1 && trail[trail.length - 2].path === path) { trail.pop(); return; }
-    trail.push({ path, title });
-    // A very long wander is trimmed from the bottom; the Dashboard is the floor.
+    if (trail.length > 1 && trail[trail.length - 2].where === where) { trail.pop(); return; }
+    trail.push({ where, title });
+    // A very long wander is trimmed from the bottom. The Dashboard may be
+    // trimmed with it; Back still falls through to it once the trail runs out.
     if (trail.length > 50) trail.splice(0, trail.length - 50);
   }
 
   /** Where Back goes from here: the page before, or the Dashboard. */
   const previousPage = () => (trail.length > 1
     ? trail[trail.length - 2]
-    : { path: '/', title: 'Dashboard' });
+    : { where: '/', title: 'Dashboard' });
 
   function renderBackButton() {
     const bar = document.getElementById('backbar');
-    if (trail.length <= 1 && trail[0] && trail[0].path === '/') { bar.innerHTML = ''; return; }
+    const here = trail[trail.length - 1];
+    if (here && here.where === '/') { bar.innerHTML = ''; return; }
     const previous = previousPage();
-    bar.innerHTML = `<a class="back-home" href="#${previous.path}">⬅️ Back to ${esc(previous.title)}</a>`;
+    bar.innerHTML = `<a class="back-home" href="#${esc(previous.where)}">⬅️ Back to ${esc(previous.title)}</a>`;
   }
 
   async function route() {
@@ -161,7 +181,7 @@
     window.scrollTo(0, 0);
 
     if (!window.api.isAdmin() && ADMIN_ONLY.some((p) => p.test(path))) {
-      rememberVisit(path, 'that page');
+      // A page they may not open is not somewhere to send them back to.
       renderBackButton();
       view.innerHTML = `<div class="card"><div class="empty">
         <h3>This page is for the owner</h3>
@@ -173,7 +193,7 @@
     for (const [pattern, title, handler] of ROUTES) {
       const match = path.match(pattern);
       if (match) {
-        rememberVisit(path, title);
+        rememberVisit(path + query, title);
         renderBackButton();
         view.innerHTML = window.ui.loading();
         try {
@@ -186,7 +206,6 @@
         return;
       }
     }
-    rememberVisit(path, 'Page not found');
     renderBackButton();
     view.innerHTML = `<div class="card"><div class="empty">
       <h3>Page not found</h3><p>The page <code>${esc(path)}</code> does not exist.</p></div></div>`;
@@ -391,6 +410,7 @@
       </button>`;
     document.getElementById('logout').addEventListener('click', async () => {
       await window.api.logout();
+      endSession();
       window.location.hash = '#/';
       showLogin();
     });
@@ -429,7 +449,10 @@
   });
 
   window.addEventListener('hashchange', route);
-  window.addEventListener('cbms:signed-out', () => showLogin('Your session has expired. Please sign in again.'));
+  window.addEventListener('cbms:signed-out', () => {
+    endSession();
+    showLogin('Your session has expired. Please sign in again.');
+  });
   window.addEventListener('cbms:settings-changed', () => applyBusiness(window.api.state.business));
 
   window.hubButtons = hubButtons;

@@ -1,4 +1,5 @@
 'use strict';
+const crypto = require('node:crypto');
 const path = require('node:path');
 const express = require('express');
 const { db, settings } = require('./db');
@@ -88,14 +89,21 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   });
 });
 
-/** Create the first admin so a fresh install can be signed into. */
+/**
+ * Create the first admin so a fresh install can be signed into.
+ *
+ * The shop sets ADMIN_EMAIL and ADMIN_PASSWORD. When they have not, the
+ * account still gets made - otherwise nobody could ever sign in - but with a
+ * password drawn at random and printed once to the log, because a default
+ * anybody could read in this file would be an open door on a public address.
+ */
 function ensureFirstAdmin() {
   const count = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
   if (count) return null;
   const email = process.env.ADMIN_EMAIL || 'owner@example.com';
-  const password = process.env.ADMIN_PASSWORD || 'owner123';
-  createUser({ name: 'Rajesh', email, password, role: 'ADMIN' });
-  return { email, password };
+  const password = process.env.ADMIN_PASSWORD || crypto.randomBytes(9).toString('base64url');
+  createUser({ name: 'Owner', email, password, role: 'ADMIN' });
+  return { email, password, generated: !process.env.ADMIN_PASSWORD };
 }
 
 if (require.main === module) {
@@ -103,7 +111,13 @@ if (require.main === module) {
   const port = Number(process.env.PORT || 3000);
   app.listen(port, () => {
     console.log(`Computer Business Management System running on http://localhost:${port}`);
-    if (created) console.log(`First admin created -> ${created.email} / ${created.password} (change this in Settings)`);
+    if (created) {
+      console.log(`First admin created -> ${created.email} / ${created.password}`);
+      if (created.generated) {
+        console.log('That password was generated because ADMIN_PASSWORD was not set. '
+          + 'Write it down now - it is not stored anywhere else - and change it in Settings.');
+      }
+    }
   });
 }
 

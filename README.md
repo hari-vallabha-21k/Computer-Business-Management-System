@@ -19,20 +19,17 @@ Every transaction → analytics dashboard updates itself
 
 ```bash
 npm install
-npm run seed      # optional: demo products, customers, sales and stock
-npm start         # http://localhost:3000
+ADMIN_EMAIL=you@yourshop.in ADMIN_PASSWORD='something only you know' npm start
 ```
 
-Demo logins created by `npm run seed`:
+The first run on an empty database creates one owner account from `ADMIN_EMAIL` and
+`ADMIN_PASSWORD` and prints it once. Set neither and the password is drawn at random and
+printed to the log on that first start — write it down, it is kept nowhere else. There is
+no built-in account and no password in this repository.
 
-| Role | Email | Password |
-|---|---|---|
-| Owner / Admin | owner@example.com | owner123 |
-| Sales Staff | staff@example.com | staff123 |
-
-Without seeding, the first run creates one admin from `ADMIN_EMAIL` / `ADMIN_PASSWORD`
-(default `owner@example.com` / `owner123`) and prints the credentials. Change the
-password-holder in **Settings → Users** before using this with real data.
+To try the software rather than run a shop, `npm run seed` fills an empty database with a
+fictional shop — products, customers, sales, stock — and two accounts whose passwords it
+prints. **It is demo data: it wipes every table first, so never point it at a real shop.**
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -40,7 +37,7 @@ password-holder in **Settings → Users** before using this with real data.
 | `DATA_DIR` | `./data` | Database and uploads directory |
 | `DB_FILE` | `./data/cbms.db` | SQLite database file |
 | `SESSION_SECRET` | random per run | HMAC key for session tokens — **required in production** |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `owner@example.com` / `owner123` | First admin on an empty database |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `owner@example.com` / random | The one owner account made on an empty database |
 
 Requires Node.js 22.13 or newer (it uses the built-in `node:sqlite`).
 
@@ -51,8 +48,9 @@ repository. With `NODE_ENV=production` the server refuses to start without it, b
 could guess the key could forge an owner login. Without `NODE_ENV=production` a fresh random key is
 made for each run, so everyone is signed out whenever the server restarts.
 
-Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` too, before the first start: they create the first owner
-account on an empty database, and the defaults above are public knowledge.
+Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` too, before the first start, so you choose the owner's
+password rather than copying a generated one out of the server log. Do not run `npm run seed`
+on a live shop: it empties every table before writing its fictional data.
 
 ## Running the Project Locally
 
