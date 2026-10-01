@@ -13,7 +13,17 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(authenticate);
-app.use(express.static(path.join(__dirname, '..', 'public')));
+/**
+ * The shop leaves this open on the counter for days at a time, so a browser
+ * holding on to an old copy of a screen is a real support problem. Every file
+ * is revalidated on each load - a cheap 304 when nothing has moved - and the
+ * page itself is never stored, so an update reaches the counter on the next
+ * reload instead of whenever the browser decides its copy is stale.
+ */
+const noStale = (res, filePath) => {
+  res.setHeader('Cache-Control', filePath.endsWith('.html') ? 'no-store, must-revalidate' : 'no-cache');
+};
+app.use(express.static(path.join(__dirname, '..', 'public'), { setHeaders: noStale }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, version: require('../package.json').version }));
 
@@ -62,7 +72,10 @@ app.use('/api', api);
 app.use('/api', (req, res) => res.status(404).json({ error: `Unknown endpoint: ${req.method} ${req.originalUrl}` }));
 
 // SPA fallback for hash-free deep links.
-app.get(/^(?!\/api).*/, (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
+app.get(/^(?!\/api).*/, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
 
 // Nothing fails silently: every error comes back as JSON the UI can show (Section 32).
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
