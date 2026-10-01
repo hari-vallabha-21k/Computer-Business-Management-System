@@ -51,41 +51,41 @@
   ];
 
   const ROUTES = [
-    [/^\/?$/, (view) => window.Pages.dashboard.render(view)],
+    [/^\/?$/, 'Dashboard', (view) => window.Pages.dashboard.render(view)],
 
     // The six spokes.
-    [/^\/sales\/new$/, (view) => window.Pages.sales.create(view)],
-    [/^\/sales\/new\/(\d+)$/, (view, id) => window.Pages.sales.create(view, id)],
-    [/^\/sales\/history$/, (view) => window.Pages.sales.history(view)],
-    [/^\/inventory\/add$/, (view) => window.Pages.inventory.addStock(view)],
-    [/^\/inventory\/list$/, (view) => window.Pages.inventory.products(view)],
-    [/^\/contacts$/, (view) => window.Pages.contacts.list(view)],
-    [/^\/admin$/, (view) => window.Pages.admin.render(view)],
+    [/^\/sales\/new$/, 'New Sale', (view) => window.Pages.sales.create(view)],
+    [/^\/sales\/new\/(\d+)$/, 'the Draft Bill', (view, id) => window.Pages.sales.create(view, id)],
+    [/^\/sales\/history$/, 'Past Bills', (view) => window.Pages.sales.history(view)],
+    [/^\/inventory\/add$/, 'Add Stock', (view) => window.Pages.inventory.addStock(view)],
+    [/^\/inventory\/list$/, 'Inventory', (view) => window.Pages.inventory.products(view)],
+    [/^\/contacts$/, 'the Address Book', (view) => window.Pages.contacts.list(view)],
+    [/^\/admin$/, 'Admin', (view) => window.Pages.admin.render(view)],
 
     // Pages opened from one of the six.
-    [/^\/sales\/invoice\/(\d+)$/, (view, id) => window.Pages.sales.invoice(view, id)],
-    [/^\/sales\/returns$/, (view) => window.Pages.sales.returns(view)],
-    [/^\/sales\/returns\/new$/, (view) => window.Pages.sales.newReturn(view)],
-    [/^\/inventory\/product\/(\d+)$/, (view, id) => window.Pages.inventory.productDetail(view, id)],
-    [/^\/inventory\/low-stock$/, (view) => window.Pages.inventory.lowStock(view)],
-    [/^\/inventory\/serials$/, (view) => window.Pages.inventory.serials(view)],
-    [/^\/contacts\/customer\/(\d+)$/, (view, id) => window.Pages.customers.detail(view, id)],
-    [/^\/contacts\/supplier\/(\d+)$/, (view, id) => window.Pages.suppliers.detail(view, id)],
-    [/^\/inventory\/add-product$/, (view) => window.Pages.inventory.addProduct(view)],
-    [/^\/inventory\/add-product\/(\d+)$/, (view, id) => window.Pages.inventory.addProduct(view, id)],
-    [/^\/inventory\/services$/, (view) => window.Pages.inventory.services(view)],
-    [/^\/inventory\/add-service$/, (view) => window.Pages.inventory.addService(view)],
-    [/^\/inventory\/add-service\/(\d+)$/, (view, id) => window.Pages.inventory.addService(view, id)],
-    [/^\/inventory\/movements$/, (view) => window.Pages.inventory.movements(view)],
-    [/^\/inventory\/adjust$/, (view) => window.Pages.inventory.adjust(view)],
-    [/^\/inventory\/hsn$/, (view) => window.Pages.inventory.hsn(view)],
-    [/^\/inventory\/hsn\/([^/]+)$/, (view, code) => window.Pages.inventory.hsnDetail(view, decodeURIComponent(code))],
-    [/^\/purchases\/?$/, (view) => window.Pages.purchases.history(view)],
-    [/^\/purchases\/add$/, (view) => window.Pages.purchases.add(view)],
-    [/^\/purchases\/(\d+)$/, (view, id) => window.Pages.purchases.detail(view, id)],
-    [/^\/analytics$/, (view) => window.Pages.reports.analytics(view)],
-    [/^\/reports$/, (view) => window.Pages.reports.render(view)],
-    [/^\/notifications$/, (view) => renderNotificationsPage(view)],
+    [/^\/sales\/invoice\/(\d+)$/, 'the Bill', (view, id) => window.Pages.sales.invoice(view, id)],
+    [/^\/sales\/returns$/, 'Returns', (view) => window.Pages.sales.returns(view)],
+    [/^\/sales\/returns\/new$/, 'the Return', (view) => window.Pages.sales.newReturn(view)],
+    [/^\/inventory\/product\/(\d+)$/, 'the Product', (view, id) => window.Pages.inventory.productDetail(view, id)],
+    [/^\/inventory\/low-stock$/, 'Low Stock', (view) => window.Pages.inventory.lowStock(view)],
+    [/^\/inventory\/serials$/, 'Serial Numbers', (view) => window.Pages.inventory.serials(view)],
+    [/^\/contacts\/customer\/(\d+)$/, 'the Contact', (view, id) => window.Pages.customers.detail(view, id)],
+    [/^\/contacts\/supplier\/(\d+)$/, 'the Contact', (view, id) => window.Pages.suppliers.detail(view, id)],
+    [/^\/inventory\/add-product$/, 'Add Product', (view) => window.Pages.inventory.addProduct(view)],
+    [/^\/inventory\/add-product\/(\d+)$/, 'Edit Product', (view, id) => window.Pages.inventory.addProduct(view, id)],
+    [/^\/inventory\/services$/, 'Services', (view) => window.Pages.inventory.services(view)],
+    [/^\/inventory\/add-service$/, 'Add Service', (view) => window.Pages.inventory.addService(view)],
+    [/^\/inventory\/add-service\/(\d+)$/, 'Edit Service', (view, id) => window.Pages.inventory.addService(view, id)],
+    [/^\/inventory\/movements$/, 'Stock Movements', (view) => window.Pages.inventory.movements(view)],
+    [/^\/inventory\/adjust$/, 'Correct Stock Count', (view) => window.Pages.inventory.adjust(view)],
+    [/^\/inventory\/hsn$/, 'HSN Codes', (view) => window.Pages.inventory.hsn(view)],
+    [/^\/inventory\/hsn\/([^/]+)$/, 'the HSN Code', (view, code) => window.Pages.inventory.hsnDetail(view, decodeURIComponent(code))],
+    [/^\/purchases\/?$/, 'Supplier Bills', (view) => window.Pages.purchases.history(view)],
+    [/^\/purchases\/add$/, 'Enter Supplier Bill', (view) => window.Pages.purchases.add(view)],
+    [/^\/purchases\/(\d+)$/, 'the Supplier Bill', (view, id) => window.Pages.purchases.detail(view, id)],
+    [/^\/analytics$/, 'Sales Figures', (view) => window.Pages.reports.analytics(view)],
+    [/^\/reports$/, 'Reports', (view) => window.Pages.reports.render(view)],
+    [/^\/notifications$/, 'Notifications', (view) => renderNotificationsPage(view)],
   ];
 
   /** Pages only the owner may open; staff get a plain explanation instead. */
@@ -101,6 +101,40 @@
         <span class="hub-sub">${esc(b.sub)}</span>
       </span>
     </a>`).join('');
+
+  /**
+   * Where the user has been, newest last, so the Back button can name the page
+   * it returns to instead of always marching them to the Dashboard.
+   *
+   * It follows its own trail rather than the browser's history, because a page
+   * can also be reached by a button that goes "back" without the browser
+   * knowing; the two would drift apart. The browser's own back button still
+   * works, and lands on the same place.
+   */
+  const trail = [];
+
+  function rememberVisit(path, title) {
+    const last = trail[trail.length - 1];
+    if (last && last.path === path) { last.title = title; return; }
+    // Returning to the page before this one closes the loop instead of
+    // stacking, so going back and forth cannot grow the trail for ever.
+    if (trail.length > 1 && trail[trail.length - 2].path === path) { trail.pop(); return; }
+    trail.push({ path, title });
+    // A very long wander is trimmed from the bottom; the Dashboard is the floor.
+    if (trail.length > 50) trail.splice(0, trail.length - 50);
+  }
+
+  /** Where Back goes from here: the page before, or the Dashboard. */
+  const previousPage = () => (trail.length > 1
+    ? trail[trail.length - 2]
+    : { path: '/', title: 'Dashboard' });
+
+  function renderBackButton() {
+    const bar = document.getElementById('backbar');
+    if (trail.length <= 1 && trail[0] && trail[0].path === '/') { bar.innerHTML = ''; return; }
+    const previous = previousPage();
+    bar.innerHTML = `<a class="back-home" href="#${previous.path}">⬅️ Back to ${esc(previous.title)}</a>`;
+  }
 
   async function route() {
     // Every visit gets a fresh view element. A page still waiting on the
@@ -123,13 +157,12 @@
       }
     }
 
-    // One way out of every page, in the same place, on every screen.
-    document.getElementById('backbar').innerHTML = path === '/' ? ''
-      : '<a class="back-home" href="#/">⬅️ Back to Dashboard</a>';
     document.getElementById('notification-panel').hidden = true;
     window.scrollTo(0, 0);
 
     if (!window.api.isAdmin() && ADMIN_ONLY.some((p) => p.test(path))) {
+      rememberVisit(path, 'that page');
+      renderBackButton();
       view.innerHTML = `<div class="card"><div class="empty">
         <h3>This page is for the owner</h3>
         <p>Ask the owner if you need access to purchases, reports or settings.</p>
@@ -137,9 +170,11 @@
       return;
     }
 
-    for (const [pattern, handler] of ROUTES) {
+    for (const [pattern, title, handler] of ROUTES) {
       const match = path.match(pattern);
       if (match) {
+        rememberVisit(path, title);
+        renderBackButton();
         view.innerHTML = window.ui.loading();
         try {
           await handler(view, match[1]);
@@ -151,6 +186,8 @@
         return;
       }
     }
+    rememberVisit(path, 'Page not found');
+    renderBackButton();
     view.innerHTML = `<div class="card"><div class="empty">
       <h3>Page not found</h3><p>The page <code>${esc(path)}</code> does not exist.</p></div></div>`;
   }

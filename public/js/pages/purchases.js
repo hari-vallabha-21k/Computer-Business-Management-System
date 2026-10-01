@@ -275,7 +275,8 @@
           <button class="btn" id="make-new">Create as new product</button>`,
         onRender: (root, close) => {
           productSearch(root.querySelector('#rematch-pick'), (product) => close(product),
-            { keepText: true, createOptions: { openingStock: false } });
+            { keepText: true, createOptions: { stockNote: 'How many you already have on the shelf, '
+              + 'not counting this supplier bill.' } });
           root.querySelector('#make-new').addEventListener('click', () => close('new'));
         },
       });

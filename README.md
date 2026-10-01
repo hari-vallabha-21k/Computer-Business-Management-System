@@ -87,8 +87,11 @@ app served as static files.
 
 The shop's owner is not a software user, so the app has no menu to learn. There is one
 **Hub** — the Dashboard — holding a large labelled button for each job, and every other
-page is a **spoke** that does one thing and offers one way out: a big
-**⬅️ Back to Dashboard** button, always first on the page, always in the same place.
+page is a **spoke** that does one thing and offers one way out: a big back button,
+always first on the page, always in the same place. It names where it goes — *⬅️ Back to
+Inventory* from a product, *⬅️ Back to Dashboard* straight off the Hub — so a step into a
+detail page is undone by one step, not by starting again. The top strip keeps a
+**🏠 Dashboard** button, so the Hub is one click away however deep the trail runs.
 
 | The Hub | Goes to |
 |---|---|

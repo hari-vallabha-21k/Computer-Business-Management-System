@@ -185,7 +185,7 @@
    * "+ Add New Product" pop-up on the invoice screen. A service keeps the same
    * record shape but has no brand, stock, shelf or serial numbers.
    */
-  function productFormHtml(p, { categories, brands, service = false, name = '', openingStock = true }) {
+  function productFormHtml(p, { categories, brands, service = false, name = '', stockNote = '' }) {
     const noun = service ? 'Service' : 'Product';
     return `
         <form class="card product-form" id="form">
@@ -197,9 +197,9 @@
                 value="${esc(p ? p.name : name)}" required>
             </label>
             <div class="form-grid">
-              <label>Category ${service ? '<span class="opt">(optional)</span>' : '<span class="req">*</span>'}
-                <select name="category" data-role="category" ${service ? '' : 'required'}>
-                  <option value="">Choose a category</option>
+              <label>Category <span class="opt">(optional)</span>
+                <select name="category" data-role="category">
+                  <option value="">No category</option>
                   ${categories.map((c) => `<option ${p && p.category === c.name ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
                   <option value="__new">+ New category…</option>
                 </select>
@@ -261,9 +261,9 @@
               <label>Shelf location <span class="opt">(optional)</span>
                 <input name="location" placeholder="e.g. Display shelf A" value="${esc(p ? p.location || '' : '')}">
               </label>
-              ${p || !openingStock ? '' : `<label>Opening stock <span class="opt">(optional)</span>
-                <input name="opening_stock" type="number" step="1" value="0">
-                <div class="hint">What you already have on the shelf today.</div></label>`}
+              ${p ? '' : `<label>Stock in hand <span class="opt">(optional)</span>
+                <input name="opening_stock" type="number" step="1" min="0" value="0">
+                <div class="hint">${stockNote || 'How many you already have on the shelf today.'}</div></label>`}
               <label class="check boxed" style="margin-top:24px">
                 <input type="checkbox" name="serial_tracked" ${p ? (p.serial_tracked ? 'checked' : '') : 'checked'}>
                 <span>Track serial numbers
@@ -327,10 +327,11 @@
       form.querySelectorAll('.invalid').forEach((el) => el.classList.remove('invalid'));
       const nameField = form.querySelector('[name=name]');
       if (!nameField.value.trim()) return invalid(nameField, `Please enter a ${service ? 'service' : 'product'} name.`);
-      if (!service && !categorySelect.value) return invalid(categorySelect, 'Please choose a category.');
       if (!field('hsn').value.trim()) return invalid(field('hsn'), 'Please enter the HSN/SAC code.');
       if (field('sell').value === '') return invalid(field('sell'), 'Please enter the price.');
       const values = formValues(form);
+      // The "+ New category…" entry is a prompt, never a category name.
+      if (values.category === '__new') values.category = '';
       try {
         if (p) return (await window.api.put(`/api/products/${p.id}`, values)).product;
         return (await window.api.post('/api/products', values)).product;
@@ -346,6 +347,10 @@
     };
   }
 
+  /** Shown where the screen itself is about to book a quantity in. */
+  const ADDING_STOCK_NOTE = 'How many you already have on the shelf. '
+    + 'The quantity you enter on this page is added on top.';
+
   const formData = () => Promise.all([window.api.get('/api/categories'), window.api.get('/api/products/filters')])
     .then(([{ categories }, { brands }]) => ({ categories, brands }));
 
@@ -353,7 +358,7 @@
    * Create a product (or service) in a pop-up without leaving the current
    * screen; resolves to the saved record, or null if the pop-up is closed.
    */
-  async function quickAddProduct(name = '', { service = false, openingStock = true } = {}) {
+  async function quickAddProduct(name = '', { service = false, stockNote = '' } = {}) {
     if (!window.api.isAdmin()) {
       toast(`Only the owner can add a new ${service ? 'service' : 'product'}. Ask them to add it.`, 'warn');
       return null;
@@ -364,7 +369,7 @@
       title: service ? 'Add New Service' : 'Add New Product',
       confirmLabel: service ? 'Save Service' : 'Save Product',
       wide: true,
-      body: productFormHtml(null, { categories, brands, service, name, openingStock }),
+      body: productFormHtml(null, { categories, brands, service, name, stockNote }),
       onRender: (root) => {
         save = wireProductForm(root, null, categories, { service });
         root.querySelector('[name=name]').focus();
@@ -619,7 +624,7 @@
       };
 
       productSearch(flow.querySelector('#product-pick'), choose,
-        { label: 'Product', createOptions: { openingStock: false } });
+        { label: 'Product', createOptions: { stockNote: ADDING_STOCK_NOTE } });
       partySearch(flow.querySelector('#supplier-pick'), 'suppliers', (s) => { supplierId = s.id; },
         { label: 'Supplier (optional)' });
       if (preset) window.api.get(`/api/products/${preset}`).then(({ product }) => choose(product)).catch(() => {});
@@ -761,7 +766,7 @@
       refreshDiff();
     };
     productSearch(view.querySelector('#product-pick'), choose,
-      { label: 'Product', createOptions: { openingStock: false } });
+      { label: 'Product', createOptions: { stockNote: ADDING_STOCK_NOTE } });
     physical.addEventListener('input', refreshDiff);
     if (preset) window.api.get(`/api/products/${preset}`).then(({ product }) => choose(product)).catch(() => {});
 
