@@ -4,7 +4,7 @@
   const {
     esc, money, rupees, plural, qty, date, dateTime, table, loading, skeleton, statusTag, toast, errorToast,
     modal, confirm, productSearch, partySearch, todayIso, rupeesInWords, pageHead, wireLinks,
-    moreMenu, wireMenus,
+    rowActions, wireRowActions,
   } = window.ui;
 
   const PAYMENT_STATUS_CLASS = { PAID: 'green', PARTIAL: 'amber', UNPAID: 'red' };
@@ -377,7 +377,8 @@
       ${pageHead({
     title: 'Invoice History',
     sub: "All invoices you've issued. Click one to view, print or share.",
-    actions: '<a class="btn primary" href="#/sales/create">+ Create Invoice</a>',
+    actions: `<a class="btn primary" href="#/sales/new">+ Create Invoice</a>
+      <a class="btn" href="#/sales/returns">Returns</a>`,
   })}
       <div class="filters">
         <div class="search">${SEARCH_ICON}
@@ -431,25 +432,18 @@
         { label: 'Status', noLabel: true, render: (r) => statusTag(r.status) },
         {
           label: '', noLabel: true,
-          render: () => moreMenu([
-            { label: 'View', action: 'view' },
-            { label: 'Print', action: 'print' },
-            { label: 'Download PDF', action: 'pdf' },
-            { label: 'Share on WhatsApp', action: 'share' },
-          ], '⋮'),
+          render: () => rowActions([{ label: 'Open', action: 'view' }, { label: 'Print', action: 'print' }]),
         },
       ], { rowAttrs: (r) => `data-id="${r.id}" data-no="${esc(r.invoice_no)}" data-total="${r.total}" data-href="#/sales/invoice/${r.id}"` })
         : `<div class="empty"><h3>No invoices found</h3>
             <p>Try the invoice number (e.g. ${esc(window.api.state.business ? `${window.api.state.business.invoice_prefix}-1024` : 'INV-1024')})
             or the customer's phone.</p>
-            <a class="btn primary" href="#/sales/create">Create Invoice</a></div>`;
+            <a class="btn primary" href="#/sales/new">Create Invoice</a></div>`;
 
       wireLinks(list);
-      wireMenus(list, {
+      wireRowActions(list, {
         view: (row) => { window.location.hash = `#/sales/invoice/${row.dataset.id}`; },
         print: (row) => window.api.openPdf(`/api/invoices/${row.dataset.id}/pdf`).catch(errorToast),
-        pdf: (row) => window.api.download(`/api/invoices/${row.dataset.id}/pdf`, {}, `${row.dataset.no}.pdf`),
-        share: (row) => shareOnWhatsApp(row.dataset.no, Number(row.dataset.total)),
       });
     };
 
@@ -498,17 +492,17 @@
       ${pageHead({
     title: `${esc(inv.invoice_no)} ${statusTag(inv.status)}`,
     sub: `${esc(inv.customer_name || 'Walk-in customer')} · ${date(inv.invoice_date)} · Paid by ${esc(inv.payment_mode || '—')}`,
-    back: { href: '#/sales', label: 'Invoice History' },
     actions: `
-      ${inv.status === 'DRAFT' ? '<button class="btn primary" id="issue">Issue Invoice</button>' : '<button class="btn primary" id="print">Print</button>'}
-      ${moreMenu([
-    ...(inv.status === 'DRAFT' ? [{ label: 'Edit draft', action: 'edit' }, { label: 'Print', action: 'print' }] : []),
-    { label: 'Download PDF', action: 'pdf' },
-    { label: 'Share on WhatsApp', action: 'share' },
-    ...(inv.status === 'ISSUED' ? [{ label: 'Return items', action: 'return' }] : []),
-    ...(inv.status !== 'CANCELLED' && window.api.can('cancel')
-    ? [{ sep: true }, { label: 'Cancel invoice', action: 'cancel', danger: true }] : []),
-  ])}`,
+      ${inv.status === 'DRAFT'
+    ? `<button class="btn primary" id="issue">Issue Invoice</button>
+       <button class="btn" data-do="edit">Edit draft</button>
+       <button class="btn" data-do="print">Print</button>`
+    : '<button class="btn primary" data-do="print">Print</button>'}
+      <button class="btn" data-do="pdf">Download PDF</button>
+      <button class="btn" data-do="share">Send on WhatsApp</button>
+      ${inv.status === 'ISSUED' ? '<button class="btn" data-do="return">Return items</button>' : ''}
+      ${inv.status !== 'CANCELLED' && window.api.can('cancel')
+    ? '<button class="btn danger" data-do="cancel">Cancel invoice</button>' : ''}`,
   })}
 
       ${inv.status === 'DRAFT' ? `<div class="alert warn"><span class="glyph">!</span>
@@ -627,20 +621,18 @@
 
       ${inv.status !== 'CANCELLED' ? '<div class="payment-tracker no-print" id="payment-tracker"></div>' : ''}`;
 
-    const pdfBtn = view.querySelector('#pdf');
-    if (pdfBtn) pdfBtn.addEventListener('click',
-      () => window.api.download(`/api/invoices/${id}/pdf`, {}, `${inv.invoice_no.replace(/\//g, '-')}.pdf`).catch(errorToast));
-    const printBtn = view.querySelector('#print');
-    if (printBtn) printBtn.addEventListener('click', () => window.api.openPdf(`/api/invoices/${id}/pdf`).catch(errorToast));
-
-    const wireInvoiceMenu = () => wireMenus(view, {
-      edit: () => { window.location.hash = `#/sales/create/${inv.id}`; },
-      print: () => window.api.openPdf(`/api/invoices/${inv.id}/pdf`).catch(errorToast),
-      pdf: () => window.api.download(`/api/invoices/${inv.id}/pdf`, {}, `${inv.invoice_no.replace(/\//g, '-')}.pdf`),
-      share: () => shareOnWhatsApp(inv.invoice_no, inv.total, inv.customer_phone),
-      return: () => { window.location.hash = '#/sales/returns/new'; },
-      cancel: () => askCancel(),
-    });
+    const wireInvoiceMenu = () => {
+      const actions = {
+        edit: () => { window.location.hash = `#/sales/new/${inv.id}`; },
+        print: () => window.api.openPdf(`/api/invoices/${inv.id}/pdf`).catch(errorToast),
+        pdf: () => window.api.download(`/api/invoices/${inv.id}/pdf`, {}, `${inv.invoice_no.replace(/\//g, '-')}.pdf`)
+          .catch(errorToast),
+        share: () => shareOnWhatsApp(inv.invoice_no, inv.total, inv.customer_phone),
+        return: () => { window.location.hash = '#/sales/returns/new'; },
+        cancel: () => askCancel(),
+      };
+      view.querySelectorAll('[data-do]').forEach((b) => b.addEventListener('click', () => actions[b.dataset.do]()));
+    };
 
     const issueBtn = view.querySelector('#issue');
     if (issueBtn) {
@@ -840,7 +832,6 @@
         ${pageHead({
     title: 'New Return',
     sub: 'Find the original invoice, then say what is coming back.',
-    back: { href: '#/sales/returns', label: 'Returns' },
   })}
         <ol class="steps" id="steps"></ol>
         <div class="card">

@@ -4,7 +4,7 @@
   'use strict';
   const {
     esc, money, rupees, qty, date, table, skeleton, toast, errorToast, modal, formValues,
-    pageHead, tiles, tabs, wireTabs, wireLinks, table: renderTable,
+    pageHead, tiles, wireLinks, table: renderTable,
   } = window.ui;
 
   const SEARCH_ICON = `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A4843"
@@ -21,7 +21,7 @@
       countCol: 'Invoices',
       kind: 'Customer',
       primary: '+ Create Invoice',
-      primaryHref: '#/sales/create',
+      primaryHref: '#/sales/new',
       namePlaceholder: 'e.g. Rahul Kumar',
       docLabel: 'Invoice',
       docHref: (id) => `#/sales/invoice/${id}`,
@@ -114,7 +114,7 @@
           { label: c.countCol, num: true, render: (r) => qty(r.transactions) },
           { label: 'Total Business', num: true, render: (r) => rupees(r.total_value) },
           { label: 'Last', render: (r) => `<span class="muted nowrap">${r.last_transaction ? date(r.last_transaction) : '—'}</span>` },
-        ], { rowAttrs: (r) => `data-href="#/${kind}/${r.id}"` })
+        ], { rowAttrs: (r) => `data-href="#/contacts/${kind === 'customers' ? 'customer' : 'supplier'}/${r.id}"` })
           : (() => {
             const q = view.querySelector('#q').value.trim();
             return `<div class="empty">
@@ -145,13 +145,11 @@
     return async function render(view, id) {
       const c = COPY[kind];
       const { record, history, products, stats } = await window.api.get(`/api/${kind}/${id}`);
-      const state = { tab: 'products' };
 
       view.innerHTML = `
         ${pageHead({
     title: esc(record.name),
     sub: `${c.kind} since ${date(stats.since)} · <button class="link-btn" id="edit">Edit details</button>`,
-    back: { href: `#/${kind}`, label: c.title },
     actions: `<a class="btn primary" href="${c.primaryHref}">${c.primary}</a>`,
   })}
         <div class="grid cols-2" style="align-items:start">
@@ -169,40 +167,35 @@
     { label: c.countCol, value: qty(stats.transactions) },
     { label: c.lastLabel, value: stats.last ? date(stats.last) : '—' },
   ])}
-            ${tabs([['products', 'Products'], ['docs', kind === 'suppliers' ? 'Bills' : 'Invoices']], state.tab)}
-            <div class="card" id="tab-body"></div>
           </div>
+        </div>
+
+        <div class="page-section">
+          <h2>Products</h2>
+          <div class="card" id="products-list"></div>
+        </div>
+        <div class="page-section">
+          <h2>${kind === 'suppliers' ? 'Bills' : 'Invoices'}</h2>
+          <div class="card" id="docs-list"></div>
         </div>`;
 
-      const body = view.querySelector('#tab-body');
-      const renderTab = () => {
-        if (state.tab === 'products') {
-          body.innerHTML = renderTable(products, [
-            { label: 'Date', render: (r) => date(r.date) },
-            { label: 'Product', render: (r) => esc(r.product) },
-            { label: 'Qty', num: true, render: (r) => qty(r.qty) },
-            { label: 'Amount', num: true, render: (r) => money(r.total) },
-          ], {
-            rowAttrs: (r) => `data-href="${c.docHref(r.doc_id)}"`,
-            empty: kind === 'suppliers' ? 'Nothing bought from them yet.' : 'Nothing bought yet.',
-          });
-        } else {
-          body.innerHTML = renderTable(history, [
-            { label: c.docLabel, class: 'doc', render: (r) => esc(r.doc_no) },
-            { label: 'Date', render: (r) => date(r.date) },
-            { label: 'Items', num: true, render: (r) => qty(r.items) },
-            { label: 'Amount', num: true, render: (r) => money(r.total) },
-            { label: 'Status', render: (r) => window.ui.statusTag(r.status) },
-          ], { rowAttrs: (r) => `data-href="${c.docHref(r.id)}"`, empty: 'Nothing recorded yet.' });
-        }
-        wireLinks(body);
-      };
-      wireTabs(view, (tab) => {
-        state.tab = tab;
-        view.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-        renderTab();
+      view.querySelector('#products-list').innerHTML = renderTable(products, [
+        { label: 'Date', render: (r) => date(r.date) },
+        { label: 'Product', render: (r) => esc(r.product) },
+        { label: 'Qty', num: true, render: (r) => qty(r.qty) },
+        { label: 'Amount', num: true, render: (r) => money(r.total) },
+      ], {
+        rowAttrs: (r) => `data-href="${c.docHref(r.doc_id)}"`,
+        empty: kind === 'suppliers' ? 'Nothing bought from them yet.' : 'Nothing bought yet.',
       });
-      renderTab();
+      view.querySelector('#docs-list').innerHTML = renderTable(history, [
+        { label: c.docLabel, class: 'doc', render: (r) => esc(r.doc_no) },
+        { label: 'Date', render: (r) => date(r.date) },
+        { label: 'Items', num: true, render: (r) => qty(r.items) },
+        { label: 'Amount', num: true, render: (r) => money(r.total) },
+        { label: 'Status', render: (r) => window.ui.statusTag(r.status) },
+      ], { rowAttrs: (r) => `data-href="${c.docHref(r.id)}"`, empty: 'Nothing recorded yet.' });
+      wireLinks(view);
 
       view.querySelector('#edit').addEventListener('click', async () => {
         try {
@@ -212,7 +205,74 @@
     };
   }
 
+  /**
+   * The Address Book: one list holding everybody, customers and suppliers
+   * together, so nobody has to work out which list a name belongs to.
+   */
+  async function contacts(view) {
+    view.innerHTML = `
+      ${pageHead({
+    title: 'Address Book',
+    sub: 'Everyone you deal with — customers and suppliers in one list.',
+    actions: `<button class="btn" id="add-customer">+ Add Customer</button>
+      ${window.api.isAdmin() ? '<button class="btn" id="add-supplier">+ Add Supplier</button>' : ''}`,
+  })}
+      <div class="filters" style="max-width:560px">
+        <div class="search">${SEARCH_ICON}
+          <input type="search" id="q" placeholder="Search anyone by name, phone, email or GSTIN…" autocomplete="off"></div>
+      </div>
+      <div class="card" id="list">${skeleton(8)}</div>`;
+
+    const load = async () => {
+      const q = view.querySelector('#q').value.trim();
+      const admin = window.api.isAdmin();
+      const [customers, suppliers] = await Promise.all([
+        window.api.get('/api/customers', { q }),
+        admin ? window.api.get('/api/suppliers', { q }) : Promise.resolve({ suppliers: [] }),
+      ]);
+      const rows = [
+        ...customers.customers.map((r) => ({ ...r, kind: 'customers' })),
+        ...suppliers.suppliers.map((r) => ({ ...r, kind: 'suppliers' })),
+      ].sort((a, b) => a.name.localeCompare(b.name));
+
+      const host = view.querySelector('#list');
+      host.innerHTML = rows.length ? table(rows, [
+        {
+          label: 'Name',
+          render: (r) => `<div style="font-weight:500">${esc(r.name)}</div>
+            ${r.address ? `<div class="sub">${esc(r.address)}</div>` : ''}`,
+        },
+        {
+          label: 'They are',
+          render: (r) => `<span class="tag ${r.kind === 'customers' ? 'green' : 'blue'}">
+            ${r.kind === 'customers' ? 'Customer' : 'Supplier'}</span>`,
+        },
+        { label: 'Phone', num: true, render: (r) => esc(r.phone || '—') },
+        { label: 'Deals', num: true, render: (r) => qty(r.transactions) },
+        { label: 'Total Business', num: true, render: (r) => rupees(r.total_value) },
+        { label: 'Last', render: (r) => `<span class="muted nowrap">${r.last_transaction ? date(r.last_transaction) : '—'}</span>` },
+      ], {
+        rowAttrs: (r) => `data-href="#/contacts/${r.kind === 'customers' ? 'customer' : 'supplier'}/${r.id}"`,
+      }) : `<div class="empty">
+          <h3>${q ? `No one called “${esc(q)}”` : 'Nobody saved yet'}</h3>
+          <p>${q ? 'Try their phone number instead.' : 'Add the people you sell to and buy from.'}</p></div>`;
+      wireLinks(host);
+    };
+
+    view.querySelector('#add-customer').addEventListener('click', async () => {
+      if (await saveContact('customers')) load();
+    });
+    const addSupplier = view.querySelector('#add-supplier');
+    if (addSupplier) addSupplier.addEventListener('click', async () => {
+      if (await saveContact('suppliers')) load();
+    });
+    let timer;
+    view.querySelector('#q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 220); });
+    await load();
+  }
+
   window.Pages = window.Pages || {};
+  window.Pages.contacts = { list: contacts };
   window.Pages.customers = { list: list('customers'), detail: detail('customers') };
   window.Pages.suppliers = { list: list('suppliers'), detail: detail('suppliers') };
 })();

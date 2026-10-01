@@ -1,126 +1,106 @@
-/* Application shell: sign-in, navigation, hash router, global search and notifications. */
+/* Application shell: sign-in, the hash router, global search and notifications.
+   Navigation is the Dashboard's grid of buttons - there is no menu here. */
 (function () {
   'use strict';
   const { esc, money, qty, dateTime, errorToast } = window.ui;
 
-  const ICON = {
-    dashboard: 'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',
-    inventory: 'M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8',
-    purchases: 'M3 4h2l2.4 11h11.2L21 8H7M9 20a1 1 0 100-2 1 1 0 000 2zM18 20a1 1 0 100-2 1 1 0 000 2z',
-    sales: 'M14 3H6v18h12V7zM14 3v4h4M9 13h6M9 17h6M9 9h2',
-    customers: 'M16 20v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 10a4 4 0 100-8 4 4 0 000 8zM22 20v-2a4 4 0 00-3-3.9M16 2.1a4 4 0 010 7.8',
-    suppliers: 'M3 21h18M5 21V5l7-2v18M12 21V8l7 3v10M8 9h1M8 13h1M8 17h1M15 13h1M15 17h1',
-    analytics: 'M4 20V10M10 20V4M16 20v-7M2 20h20',
-    reports: 'M14 3H6v18h12V7zM14 3v4h4M9 17v-3M12 17v-6M15 17v-2',
-    settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
-  };
-
   /**
-   * Top-level sections with their children, exactly as the sidebar reads.
-   * `match` marks the parent active for any page that belongs to it.
+   * The Hub. Every task the shop does has one button here, and nothing is
+   * hidden behind a menu, a tab or a dropdown.
    */
-  const NAV = [
-    { href: '#/', label: 'Dashboard', icon: ICON.dashboard },
+  const HUB = [
     {
-      href: '#/inventory', label: 'Inventory', icon: ICON.inventory, match: /^#\/inventory/,
-      children: [
-        { href: '#/inventory/products', label: 'Products', match: /^#\/inventory\/(products|add-product|product)/ },
-        { href: '#/inventory/services', label: 'Services', match: /^#\/inventory\/(services|add-service)/ },
-        { href: '#/inventory/add-stock', label: 'Add Stock' },
-        { href: '#/inventory/movements', label: 'Stock Movements', match: /^#\/inventory\/(movements|adjust)/ },
-        { href: '#/inventory/low-stock', label: 'Low Stock', badge: 'lowStock' },
-        { href: '#/inventory/serials', label: 'Serial Numbers', permission: 'serials' },
-        { href: '#/inventory/hsn', label: 'HSN Code', admin: true, match: /^#\/inventory\/hsn/ },
-      ],
+      href: '#/sales/new', icon: '🛒', tone: 'tone-sale',
+      label: 'New Sale (Create Bill)', sub: 'Make a bill for a customer and print it.',
     },
     {
-      href: '#/purchases', label: 'Purchases', icon: ICON.purchases, admin: true, match: /^#\/purchases/,
-      children: [
-        { href: '#/purchases/add', label: 'Add Purchase' },
-        { href: '#/purchases', label: 'Purchase History', match: /^#\/purchases(\/\d+)?$/ },
-      ],
+      href: '#/sales/history', icon: '📜',
+      label: 'Search Past Bills & Returns', sub: 'Find an old bill, print it again, or take goods back.',
     },
     {
-      href: '#/sales', label: 'Sales', icon: ICON.sales, match: /^#\/sales/,
-      children: [
-        { href: '#/sales/create', label: 'Create Invoice', match: /^#\/sales\/create/ },
-        { href: '#/sales', label: 'Invoice History', match: /^#\/sales$|^#\/sales\/invoice/ },
-        { href: '#/sales/returns', label: 'Returns' },
-      ],
+      href: '#/inventory/add', icon: '📦', tone: 'tone-stock',
+      label: 'Enter Supplier Bill (Add Stock)', sub: 'Put new stock on the shelf from a supplier bill.',
     },
-    { href: '#/customers', label: 'Customers', icon: ICON.customers, match: /^#\/customers/ },
-    { href: '#/suppliers', label: 'Suppliers', icon: ICON.suppliers, admin: true, match: /^#\/suppliers/ },
-    { href: '#/analytics', label: 'Analytics', icon: ICON.analytics, admin: true },
-    { href: '#/reports', label: 'Reports', icon: ICON.reports, admin: true },
+    {
+      href: '#/inventory/list', icon: '📋',
+      label: 'View Current Inventory', sub: 'See what is on the shelf and what is running out.',
+    },
+    {
+      href: '#/contacts', icon: '📒',
+      label: 'Address Book (Contacts)', sub: 'Customers and suppliers, with what they bought.',
+    },
+    {
+      href: '#/admin', icon: '⚙️', tone: 'tone-admin', admin: true,
+      label: 'Admin, Reports & Settings', sub: 'GST reports, products, staff and shop settings.',
+    },
+  ];
+
+  /** Old addresses still work; they land on the page that replaced them. */
+  const REDIRECTS = [
+    [/^\/sales\/create$/, '#/sales/new'],
+    [/^\/sales\/create\/(\d+)$/, (id) => `#/sales/new/${id}`],
+    [/^\/sales$/, '#/sales/history'],
+    [/^\/inventory$/, '#/inventory/list'],
+    [/^\/inventory\/products$/, '#/inventory/list'],
+    [/^\/inventory\/add-stock$/, '#/inventory/add'],
+    [/^\/customers$/, '#/contacts'],
+    [/^\/customers\/(\d+)$/, (id) => `#/contacts/customer/${id}`],
+    [/^\/suppliers$/, '#/contacts'],
+    [/^\/suppliers\/(\d+)$/, (id) => `#/contacts/supplier/${id}`],
+    [/^\/settings$/, '#/admin'],
   ];
 
   const ROUTES = [
     [/^\/?$/, (view) => window.Pages.dashboard.render(view)],
-    [/^\/inventory\/?$/, (view) => window.Pages.inventory.overview(view)],
-    [/^\/inventory\/products$/, (view) => window.Pages.inventory.products(view)],
+
+    // The six spokes.
+    [/^\/sales\/new$/, (view) => window.Pages.sales.create(view)],
+    [/^\/sales\/new\/(\d+)$/, (view, id) => window.Pages.sales.create(view, id)],
+    [/^\/sales\/history$/, (view) => window.Pages.sales.history(view)],
+    [/^\/inventory\/add$/, (view) => window.Pages.inventory.addStock(view)],
+    [/^\/inventory\/list$/, (view) => window.Pages.inventory.products(view)],
+    [/^\/contacts$/, (view) => window.Pages.contacts.list(view)],
+    [/^\/admin$/, (view) => window.Pages.admin.render(view)],
+
+    // Pages opened from one of the six.
+    [/^\/sales\/invoice\/(\d+)$/, (view, id) => window.Pages.sales.invoice(view, id)],
+    [/^\/sales\/returns$/, (view) => window.Pages.sales.returns(view)],
+    [/^\/sales\/returns\/new$/, (view) => window.Pages.sales.newReturn(view)],
+    [/^\/inventory\/product\/(\d+)$/, (view, id) => window.Pages.inventory.productDetail(view, id)],
+    [/^\/inventory\/low-stock$/, (view) => window.Pages.inventory.lowStock(view)],
+    [/^\/inventory\/serials$/, (view) => window.Pages.inventory.serials(view)],
+    [/^\/contacts\/customer\/(\d+)$/, (view, id) => window.Pages.customers.detail(view, id)],
+    [/^\/contacts\/supplier\/(\d+)$/, (view, id) => window.Pages.suppliers.detail(view, id)],
     [/^\/inventory\/add-product$/, (view) => window.Pages.inventory.addProduct(view)],
     [/^\/inventory\/add-product\/(\d+)$/, (view, id) => window.Pages.inventory.addProduct(view, id)],
     [/^\/inventory\/services$/, (view) => window.Pages.inventory.services(view)],
     [/^\/inventory\/add-service$/, (view) => window.Pages.inventory.addService(view)],
     [/^\/inventory\/add-service\/(\d+)$/, (view, id) => window.Pages.inventory.addService(view, id)],
-    [/^\/inventory\/add-stock$/, (view) => window.Pages.inventory.addStock(view)],
     [/^\/inventory\/movements$/, (view) => window.Pages.inventory.movements(view)],
     [/^\/inventory\/adjust$/, (view) => window.Pages.inventory.adjust(view)],
-    [/^\/inventory\/low-stock$/, (view) => window.Pages.inventory.lowStock(view)],
-    [/^\/inventory\/serials$/, (view) => window.Pages.inventory.serials(view)],
     [/^\/inventory\/hsn$/, (view) => window.Pages.inventory.hsn(view)],
     [/^\/inventory\/hsn\/([^/]+)$/, (view, code) => window.Pages.inventory.hsnDetail(view, decodeURIComponent(code))],
-    [/^\/inventory\/product\/(\d+)$/, (view, id) => window.Pages.inventory.productDetail(view, id)],
     [/^\/purchases\/?$/, (view) => window.Pages.purchases.history(view)],
     [/^\/purchases\/add$/, (view) => window.Pages.purchases.add(view)],
     [/^\/purchases\/(\d+)$/, (view, id) => window.Pages.purchases.detail(view, id)],
-    [/^\/sales\/?$/, (view) => window.Pages.sales.history(view)],
-    [/^\/sales\/create$/, (view) => window.Pages.sales.create(view)],
-    [/^\/sales\/create\/(\d+)$/, (view, id) => window.Pages.sales.create(view, id)],
-    [/^\/sales\/invoice\/(\d+)$/, (view, id) => window.Pages.sales.invoice(view, id)],
-    [/^\/sales\/returns$/, (view) => window.Pages.sales.returns(view)],
-    [/^\/sales\/returns\/new$/, (view) => window.Pages.sales.newReturn(view)],
-    [/^\/customers$/, (view) => window.Pages.customers.list(view)],
-    [/^\/customers\/(\d+)$/, (view, id) => window.Pages.customers.detail(view, id)],
-    [/^\/suppliers$/, (view) => window.Pages.suppliers.list(view)],
-    [/^\/suppliers\/(\d+)$/, (view, id) => window.Pages.suppliers.detail(view, id)],
     [/^\/analytics$/, (view) => window.Pages.reports.analytics(view)],
     [/^\/reports$/, (view) => window.Pages.reports.render(view)],
     [/^\/notifications$/, (view) => renderNotificationsPage(view)],
-    [/^\/settings$/, (view) => window.Pages.settings.render(view)],
   ];
 
   /** Pages only the owner may open; staff get a plain explanation instead. */
-  const ADMIN_ONLY = [/^\/purchases/, /^\/suppliers/, /^\/analytics/, /^\/reports/, /^\/settings/,
+  const ADMIN_ONLY = [/^\/purchases/, /^\/analytics/, /^\/reports/, /^\/settings/, /^\/admin/,
     /^\/inventory\/add-product/, /^\/inventory\/add-service/, /^\/inventory\/adjust/, /^\/inventory\/hsn/];
 
-  const counters = { lowStock: 0 };
-
-  function navLink(item, current, sub) {
-    const active = item.match ? item.match.test(current) : current === item.href;
-    const badge = item.badge && counters[item.badge]
-      ? `<span class="pill">${counters[item.badge]}</span>` : '';
-    const icon = item.icon
-      ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-           stroke-linecap="round" stroke-linejoin="round"><path d="${item.icon}"/></svg>` : '';
-    return `<a href="${item.href}" class="${sub ? 'sub' : ''} ${active ? 'active' : ''}">${icon}<span>${esc(item.label)}</span>${badge}</a>`;
-  }
-
-  function renderNav() {
-    const current = (window.location.hash || '#/').split('?')[0];
-    const allowed = (item) => (!item.admin || window.api.isAdmin())
-      && (!item.permission || window.api.can(item.permission));
-
-    document.getElementById('nav').innerHTML = NAV.filter(allowed).map((item) => {
-      const children = (item.children || []).filter(allowed);
-      const open = children.length && (item.match ? item.match.test(current) : false);
-      return navLink(item, current) + (open ? children.map((c) => navLink(c, current, true)).join('') : '');
-    }).join('');
-
-    document.getElementById('settings-link').innerHTML = window.api.isAdmin()
-      ? navLink({ href: '#/settings', label: 'Settings', icon: ICON.settings }, current)
-      : '';
-  }
+  /** The Hub's buttons, used by the Dashboard. */
+  const hubButtons = () => HUB.filter((b) => !b.admin || window.api.isAdmin()).map((b) => `
+    <a class="hub-btn ${b.tone || ''}" href="${b.href}">
+      <span class="hub-icon" aria-hidden="true">${b.icon}</span>
+      <span>
+        <span class="hub-label">${esc(b.label)}</span>
+        <span class="hub-sub">${esc(b.sub)}</span>
+      </span>
+    </a>`).join('');
 
   async function route() {
     // Every visit gets a fresh view element. A page still waiting on the
@@ -131,18 +111,28 @@
     const view = previous.cloneNode(false);
     previous.replaceWith(view);
     // "?product=5" carries context for the page; it is not part of the route.
-    const path = (window.location.hash || '#/').slice(1).split('?')[0] || '/';
-    renderNav();
-    document.getElementById('sidebar').classList.remove('open');
-    document.getElementById('scrim').hidden = true;
+    const hash = window.location.hash || '#/';
+    const path = hash.slice(1).split('?')[0] || '/';
+    const query = hash.includes('?') ? `?${hash.split('?')[1]}` : '';
+
+    for (const [pattern, to] of REDIRECTS) {
+      const hit = path.match(pattern);
+      if (hit) {
+        window.location.replace(`${typeof to === 'function' ? to(hit[1]) : to}${query}`);
+        return;
+      }
+    }
+
+    // One way out of every page, in the same place, on every screen.
+    document.getElementById('backbar').innerHTML = path === '/' ? ''
+      : '<a class="back-home" href="#/">⬅️ Back to Dashboard</a>';
     document.getElementById('notification-panel').hidden = true;
     window.scrollTo(0, 0);
 
     if (!window.api.isAdmin() && ADMIN_ONLY.some((p) => p.test(path))) {
       view.innerHTML = `<div class="card"><div class="empty">
         <h3>This page is for the owner</h3>
-        <p>Ask the owner if you need access to purchases, suppliers, reports or settings.</p>
-        <a class="btn" href="#/">Back to Dashboard</a>
+        <p>Ask the owner if you need access to purchases, reports or settings.</p>
       </div></div>`;
       return;
     }
@@ -162,8 +152,7 @@
       }
     }
     view.innerHTML = `<div class="card"><div class="empty">
-      <h3>Page not found</h3><p>The page <code>${esc(path)}</code> does not exist.</p>
-      <a class="btn primary" href="#/">Back to the dashboard</a></div></div>`;
+      <h3>Page not found</h3><p>The page <code>${esc(path)}</code> does not exist.</p></div></div>`;
   }
 
   // ---------- Global search ----------
@@ -291,16 +280,13 @@
       });
       wireNotificationLinks(panel);
 
-      const { items } = await window.api.get('/api/inventory/low-stock');
-      counters.lowStock = items.length;
-      renderNav();
     } catch { /* the badge is best-effort */ }
   }
 
   async function renderNotificationsPage(view) {
     const tab = sessionStorage.getItem('cbms_notif_tab') || '';
     const { notifications } = await window.api.get('/api/notifications', { limit: 100, type: tab });
-    const tabs = [['', 'All'], ['LOW_STOCK', 'Stock'], ['INVOICE', 'Invoices'], ['SCAN', 'Scanning']];
+    const kinds = [['', 'Everything'], ['LOW_STOCK', 'Stock'], ['INVOICE', 'Invoices'], ['SCAN', 'Scanning']];
     view.innerHTML = `
       <div style="max-width:820px">
         <div class="page-head">
@@ -310,18 +296,22 @@
           </div>
           <div class="actions"><button class="link-btn" id="mark-all">Mark all as read</button></div>
         </div>
-        <div class="tabs">${tabs.map(([key, label]) =>
-    `<button data-tab="${key}" class="${tab === key ? 'active' : ''}">${label}</button>`).join('')}</div>
+        <div class="filters">
+          <label style="margin:0">Show
+            <select id="kind">${kinds.map(([key, label]) =>
+    `<option value="${key}" ${tab === key ? 'selected' : ''}>${label}</option>`).join('')}</select>
+          </label>
+        </div>
         <div class="card">
           ${notifications.length ? notifications.map((n) => notificationRow(n, true)).join('')
     : '<div class="empty"><h3>Nothing to report</h3><p>Low stock and scanning problems will show up here.</p></div>'}
         </div>
       </div>`;
     wireNotificationLinks(view);
-    view.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
-      sessionStorage.setItem('cbms_notif_tab', b.dataset.tab);
+    view.querySelector('#kind').addEventListener('change', (e) => {
+      sessionStorage.setItem('cbms_notif_tab', e.target.value);
       renderNotificationsPage(view);
-    }));
+    });
     view.querySelector('#mark-all').addEventListener('click', async () => {
       await window.api.post('/api/notifications/read', {});
       refreshNotifications();
@@ -371,7 +361,6 @@
       weekday: 'long', day: 'numeric', month: 'short', year: 'numeric',
     });
     applyBusiness(window.api.state.business);
-    renderNav();
     await route();
     refreshNotifications();
     clearInterval(window.__cbmsPoll);
@@ -390,13 +379,6 @@
     }
   });
 
-  const drawer = (open) => {
-    document.getElementById('sidebar').classList.toggle('open', open);
-    document.getElementById('scrim').hidden = !open;
-  };
-  document.getElementById('menu-toggle').addEventListener('click', () => drawer(true));
-  document.getElementById('scrim').addEventListener('click', () => drawer(false));
-
   document.getElementById('bell').addEventListener('click', (e) => {
     e.stopPropagation();
     const panel = document.getElementById('notification-panel');
@@ -411,10 +393,9 @@
 
   window.addEventListener('hashchange', route);
   window.addEventListener('cbms:signed-out', () => showLogin('Your session has expired. Please sign in again.'));
-  window.addEventListener('cbms:settings-changed', () => {
-    applyBusiness(window.api.state.business);
-    renderNav();
-  });
+  window.addEventListener('cbms:settings-changed', () => applyBusiness(window.api.state.business));
+
+  window.hubButtons = hubButtons;
 
   setupSearch();
 

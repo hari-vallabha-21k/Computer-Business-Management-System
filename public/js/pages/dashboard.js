@@ -1,5 +1,7 @@
-/* Dashboard: how the shop is doing today — numbers, what needs reordering,
-   what is selling, the sales trend and the last few invoices. */
+/* The Hub. Every task has its own button here, so nothing is ever hidden in a
+   menu: pick a job, do it on its own page, come back. Underneath the buttons
+   is how the shop is doing today — numbers, what needs reordering, what is
+   selling, the sales trend and the last few invoices. */
 (function () {
   'use strict';
   const {
@@ -44,12 +46,22 @@
       ${pageHead({
     eyebrow: 'Dashboard',
     title: greeting(user.name),
-    sub: "Here's how the shop is doing today.",
-    actions: `<select id="period" aria-label="Period" style="width:auto">
-        ${PERIODS.map(([k, l]) => `<option value="${k}" ${state.period === k ? 'selected' : ''}>${l}</option>`).join('')}
-      </select>`,
+    sub: 'Choose what you want to do.',
   })}
-      <div id="dash-body">${skeleton(4)}</div>`;
+
+      <div class="hub">${window.hubButtons()}</div>
+
+      <div class="page-section">
+        <h2>How the shop is doing</h2>
+        <div class="filters">
+          <label style="margin:0">Show
+            <select id="period" aria-label="Period">
+              ${PERIODS.map(([k, l]) => `<option value="${k}" ${state.period === k ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+        <div id="dash-body">${skeleton(4)}</div>
+      </div>`;
 
     view.querySelector('#period').addEventListener('change', (e) => {
       state.period = e.target.value;
@@ -85,7 +97,7 @@
           ? `${plural(k.invoices, 'invoice')} · ${moneyShort(k.serviceRevenue)} services excl. GST`
           : plural(k.invoices, 'invoice'),
         delta: change.revenue,
-        href: '#/sales',
+        href: '#/sales/history',
       },
       admin
         ? {
@@ -95,7 +107,7 @@
         : { label: 'Items Sold', value: qty(k.itemsSold), note: 'This period', href: '#/sales' },
       {
         label: 'Current Stock', value: `${qty(k.currentStock)} units`,
-        note: `${k.totalProducts} products`, href: '#/inventory',
+        note: `${k.totalProducts} products`, href: '#/inventory/list',
       },
       {
         label: 'Low Stock', value: plural(k.lowStockItems + k.outOfStock, 'product'),
@@ -104,21 +116,12 @@
     ];
 
     body.innerHTML = `
-      <section style="margin-bottom:24px">
-        <h2 style="margin-bottom:12px">Quick Actions</h2>
-        <div class="btn-row">
-          <a class="btn primary tall" href="#/sales/create">+ Create Invoice</a>
-          <a href="#/inventory/add-stock">+ Add Stock</a>
-          ${admin ? '<a href="#/inventory/add-product">+ Add Product</a>' : ''}
-        </div>
-      </section>
-
       ${tiles(metrics)}
       <div class="grid cols-2">
         <section class="card">
           <div class="card-head">
             <h2><span class="glyph warn">!</span>Low Stock</h2>
-            <a href="#/inventory/low-stock">View all</a>
+            <a class="btn small" href="#/inventory/low-stock">See all low stock</a>
           </div>
           ${low.items.length ? low.items.slice(0, 4).map((p) => `
             <div class="row-link clickable" data-href="#/inventory/product/${p.id}">
@@ -134,7 +137,7 @@
         <section class="card">
           <div class="card-head">
             <h2>Top Selling · This Month</h2>
-            ${admin ? '<a href="#/analytics">View all</a>' : ''}
+            ${admin ? '<a class="btn small" href="#/analytics">See all sales figures</a>' : ''}
           </div>
           ${top.products.length ? top.products.map((p, i) => `
             <div class="row-link clickable" data-href="#/inventory/product/${p.id}">
@@ -149,7 +152,8 @@
       ${admin ? '<section class="card" id="trend-card"></section>' : ''}
 
       <section class="card">
-        <div class="card-head"><h2>Recent Invoices</h2><a href="#/sales">View all</a></div>
+        <div class="card-head"><h2>Recent Invoices</h2>
+          <a class="btn small" href="#/sales/history">See all bills</a></div>
         ${invoices.invoices.length ? table(invoices.invoices, [
     { label: 'Invoice', class: 'doc', render: (r) => esc(r.invoice_no) },
     { label: 'Customer', render: (r) => esc(r.customer_name || 'Walk-in') },

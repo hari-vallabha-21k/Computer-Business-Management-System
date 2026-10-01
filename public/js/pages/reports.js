@@ -153,7 +153,7 @@
         <section>
           <h2 style="margin-bottom:12px">Inventory Overview</h2>
           ${tiles([
-    { label: 'Total Products', value: qty(totalProducts), href: '#/inventory/products' },
+    { label: 'Total Products', value: qty(totalProducts), href: '#/inventory/list' },
     { label: 'Total Units', value: qty(totalUnits), href: '#/inventory' },
     { label: 'Low Stock', value: qty(k.lowStockItems), accent: 'warn', href: '#/inventory/low-stock' },
     { label: 'Out of Stock', value: qty(k.outOfStock), accent: 'danger', href: '#/inventory/low-stock' },

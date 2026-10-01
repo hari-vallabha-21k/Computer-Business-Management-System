@@ -95,52 +95,73 @@ a:hover { color: var(--primary-dark); text-decoration: underline; }
 }
 .mark.small { width: 36px; height: 36px; font-size: 22px; }
 
-/* ---------- Shell ---------- */
-#shell { display: flex; min-height: 100vh; }
+/* ---------- Shell ----------
+   Hub and spoke: no sidebar and no navigation bar. The top strip carries the
+   shop's name, search and the signed-in user, and every page below it is
+   reached from the Dashboard and left again with one big button. */
+#shell { display: block; min-height: 100vh; }
 
-.sidebar {
-  width: 248px; flex: none; background: var(--ink-deep); color: var(--paper);
-  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; z-index: 50;
-}
-.brand { display: flex; align-items: center; gap: 10px; padding: 20px 18px 18px; border-bottom: 1px solid rgba(245, 244, 240, .1); }
-.brand .name { font-family: var(--serif); font-size: 21px; font-weight: 600; line-height: 1; }
-.brand .kind { font-size: 12px; color: rgba(245, 244, 240, .62); margin-top: 5px; letter-spacing: .04em; }
-
-nav { flex: 1; overflow-y: auto; padding: 8px 10px 12px; }
-nav a, .sidebar-footer a {
-  display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; margin-top: 6px;
-  border-radius: var(--control-radius); color: rgba(245, 244, 240, .86); font-size: 15px; font-weight: 500;
-  text-decoration: none;
-}
-nav a svg, .sidebar-footer a svg { flex: none; opacity: .85; }
-nav a:hover, .sidebar-footer a:hover { background: rgba(245, 244, 240, .08); color: #fff; text-decoration: none; }
-nav a.active, .sidebar-footer a.active { background: rgba(245, 244, 240, .14); color: #fff; font-weight: 600; }
-nav a.sub { height: 36px; margin-top: 0; padding: 0 12px 0 42px; font-size: 14px; color: rgba(245, 244, 240, .74); }
-nav a .pill {
-  margin-left: auto; min-width: 22px; height: 20px; padding: 0 6px; border-radius: 10px;
-  background: var(--amber-bg); color: var(--amber); font-size: 12px; font-weight: 600;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.sidebar-footer { border-top: 1px solid rgba(245, 244, 240, .1); padding: 8px 10px 12px; }
-.user-chip { display: flex; align-items: center; gap: 12px; padding: 8px 12px; margin-top: 6px; border-radius: var(--control-radius); }
-.user-chip:hover { background: rgba(245, 244, 240, .05); }
-.user-chip .avatar {
-  width: 32px; height: 32px; flex: none; border-radius: 50%; background: rgba(245, 244, 240, .14);
-  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #fff;
-}
-.user-chip .who { flex: 1; min-width: 0; }
-.user-chip .who b { display: block; font-size: 14px; font-weight: 500; color: rgba(245, 244, 240, .9); }
-.user-chip .who span { display: block; font-size: 11.5px; color: rgba(245, 244, 240, .5); margin-top: 2px; }
-.sidebar-footer button.link { background: none; border: 0; color: rgba(245, 244, 240, .5); font: inherit; font-size: 13px; cursor: pointer; padding: 6px; }
-.sidebar-footer button.link:hover { color: #fff; opacity: 1 !important; }
-.scrim { position: fixed; inset: 0; background: rgba(10, 10, 10, .45); z-index: 40; }
-
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.main { min-width: 0; display: flex; flex-direction: column; }
 .topbar {
-  height: 64px; background: var(--surface); border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 12px; padding: 0 20px; position: sticky; top: 0; z-index: 30;
+  height: 68px; background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 16px; padding: 0 20px; position: sticky; top: 0; z-index: 30;
 }
-#menu-toggle { display: none; }
+.brand { display: flex; align-items: center; gap: 10px; flex: none; }
+.brand .name { font-family: var(--serif); font-size: 21px; font-weight: 600; line-height: 1.1; }
+
+.user-chip { display: flex; align-items: center; gap: 10px; flex: none; }
+.user-chip .avatar {
+  width: 34px; height: 34px; flex: none; border-radius: 50%; background: var(--primary-soft);
+  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600;
+  color: var(--primary-dark);
+}
+.user-chip .who { min-width: 0; }
+.user-chip .who b { display: block; font-size: 14px; font-weight: 500; }
+.user-chip .who span { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+.user-chip button.link {
+  background: none; border: 0; color: var(--muted); font: inherit; cursor: pointer; padding: 6px;
+  display: inline-flex; align-items: center;
+}
+.user-chip button.link:hover { color: var(--ink); opacity: 1 !important; }
+
+/* ---------- The Hub: one big button per task ---------- */
+.hub { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 18px; }
+.hub-btn {
+  display: flex; align-items: center; gap: 18px; text-align: left; width: 100%;
+  min-height: 118px; padding: 22px 24px; border: 2px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; text-decoration: none;
+  transition: border-color .15s ease, background .15s ease, transform .1s ease;
+}
+.hub-btn:hover, .hub-btn:focus-visible {
+  border-color: var(--primary); background: var(--primary-pale); text-decoration: none; color: var(--ink);
+}
+.hub-btn:active { transform: translateY(1px); }
+.hub-btn .hub-icon {
+  width: 64px; height: 64px; flex: none; border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center; font-size: 32px; line-height: 1;
+  background: var(--primary-soft);
+}
+.hub-btn .hub-label { display: block; font-size: 22px; font-weight: 600; font-family: var(--serif); line-height: 1.2; }
+.hub-btn .hub-sub { display: block; font-size: 14.5px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+/* The Admin page repeats the pattern at a smaller size. */
+.hub.compact { grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 14px; }
+.hub.compact .hub-btn { min-height: 88px; padding: 16px 18px; gap: 14px; }
+.hub.compact .hub-icon { width: 48px; height: 48px; font-size: 24px; }
+.hub.compact .hub-label { font-size: 18px; }
+.hub.compact .hub-sub { font-size: 13.5px; }
+
+.hub-btn.tone-sale .hub-icon { background: var(--green-bg); }
+.hub-btn.tone-stock .hub-icon { background: var(--amber-bg); }
+.hub-btn.tone-admin .hub-icon { background: var(--red-bg); }
+
+/* The one way back. Always first on the page, always the same. */
+.back-home {
+  display: inline-flex; align-items: center; gap: 10px; margin-bottom: 22px;
+  height: 56px; padding: 0 26px; border: 2px solid var(--primary); border-radius: var(--radius);
+  background: var(--primary); color: #fff; font: inherit; font-size: 18px; font-weight: 600;
+  cursor: pointer; text-decoration: none;
+}
+.back-home:hover, .back-home:focus-visible { background: var(--primary-dark); border-color: var(--primary-dark); color: #fff; text-decoration: none; }
 .global-search { position: relative; flex: 1; max-width: 480px; }
 .global-search input { height: var(--control); width: 100%; padding-left: 40px; background: var(--surface-2); }
 .global-search input:focus { background: var(--surface); }
@@ -412,7 +433,17 @@ tfoot td { font-weight: 600; border-top: 2px solid var(--border); border-bottom:
 .filters > select, .filters > input { width: auto; min-width: 150px; }
 .filters .search input { width: 100%; }
 
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; overflow-x: auto; }
+/* Row buttons are spelled out; nothing hides behind a "more" menu. */
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* A page is one long scroll of labelled sections, never a set of tabs. */
+.page-section { margin-top: 32px; }
+.page-section > h2 {
+  font-family: var(--serif); font-size: 25px; font-weight: 600; margin: 0 0 14px;
+  padding-bottom: 8px; border-bottom: 2px solid var(--border);
+}
+
+.tabs { display: none; }
 .tabs a, .tabs button {
   height: 44px; padding: 0 14px; display: flex; align-items: center; border: 0; background: none;
   border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--muted);
@@ -421,8 +452,8 @@ tfoot td { font-weight: 600; border-top: 2px solid var(--border); border-bottom:
 .tabs a.active, .tabs button.active { color: var(--ink); font-weight: 600; border-bottom-color: var(--primary); }
 .tabs a:hover, .tabs button:hover { text-decoration: none; color: var(--ink); }
 
-.settings-layout { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
-.settings-nav { flex: 0 1 220px; min-width: 200px; display: flex; flex-direction: column; gap: 2px; }
+.settings-layout { display: block; }
+.settings-nav { display: none; }
 .settings-nav button {
   height: var(--control); padding: 0 14px; text-align: left; border: 0; border-radius: var(--control-radius);
   background: none; font: inherit; font-weight: 500; cursor: pointer;
@@ -505,11 +536,13 @@ tfoot td { font-weight: 600; border-top: 2px solid var(--border); border-bottom:
 
 /* ---------- Phone ---------- */
 @media (max-width: 900px) {
-  .sidebar { position: fixed; top: 0; left: 0; transform: translateX(-100%); transition: transform .2s ease; }
-  .sidebar.open { transform: none; box-shadow: 0 0 40px rgba(0, 0, 0, .35); }
-  #menu-toggle { display: inline-flex; }
-  .topbar { padding: 0 12px; gap: 8px; }
+  .topbar { padding: 0 12px; gap: 10px; }
   .topbar .today { display: none; }
+  .user-chip .who { display: none; }
+  .hub-btn { min-height: 96px; padding: 18px; gap: 14px; }
+  .hub-btn .hub-icon { width: 52px; height: 52px; font-size: 26px; }
+  .hub-btn .hub-label { font-size: 19px; }
+  .back-home { width: 100%; justify-content: center; }
   .view { padding: 20px 16px 48px; }
   h1 { font-size: 28px; }
   .summary { position: static; }
@@ -533,7 +566,7 @@ tfoot td { font-weight: 600; border-top: 2px solid var(--border); border-bottom:
 }
 
 @media print {
-  .sidebar, .topbar, .page-head .actions, .btn, .tabs, .notification-panel, .toast-stack, .back-link, .no-print, .payment-tracker { display: none !important; }
+  .topbar, .page-head .actions, .btn, .tabs, .back-home, .notification-panel, .toast-stack, .back-link, .no-print, .payment-tracker { display: none !important; }
   body, .view, .card { background: #fff; }
   .card, .invoice-preview { border: 0; box-shadow: none; }
   .view { padding: 0; max-width: none; }

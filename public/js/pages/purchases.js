@@ -4,7 +4,7 @@
   'use strict';
   const {
     esc, money, rupees, qty, plural, date, dateTime, table, skeleton, statusTag, toast, errorToast, modal,
-    productSearch, partySearch, formValues, todayIso, pageHead, wireLinks, moreMenu, wireMenus,
+    productSearch, partySearch, formValues, todayIso, pageHead, wireLinks,
   } = window.ui;
 
   const SEARCH_ICON = `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A4843"
@@ -65,13 +65,10 @@
       <div style="max-width:960px">
         ${pageHead({
     title: `${esc(p.purchase_no)} ${statusTag(p.status)}`,
-    sub: `From ${p.supplier_id ? `<a href="#/suppliers/${p.supplier_id}">${esc(p.supplier_name)}</a>` : esc(p.supplier_name || 'an unnamed supplier')}
+    sub: `From ${p.supplier_id ? `<a href="#/contacts/supplier/${p.supplier_id}">${esc(p.supplier_name)}</a>` : esc(p.supplier_name || 'an unnamed supplier')}
       · ${date(p.invoice_date)}${p.supplier_invoice_no ? ` · Supplier bill ${esc(p.supplier_invoice_no)}` : ''}`,
-    back: { href: '#/purchases', label: 'Purchase History' },
-    actions: moreMenu([
-      { label: 'Print', action: 'print' },
-      { label: 'Add another purchase', action: 'add' },
-    ]),
+    actions: `<button class="btn" data-do="print">Print</button>
+      <a class="btn" href="#/purchases/add">Enter another bill</a>`,
   })}
 
         ${p.status === 'NEEDS_REVIEW' ? `
@@ -124,10 +121,7 @@
       </div>`;
 
     wireLinks(view);
-    wireMenus(view, {
-      print: () => window.print(),
-      add: () => { window.location.hash = '#/purchases/add'; },
-    });
+    view.querySelector('[data-do="print"]').addEventListener('click', () => window.print());
     const checked = view.querySelector('#mark-checked');
     if (checked) {
       checked.addEventListener('click', async () => {
@@ -145,7 +139,6 @@
       ${pageHead({
     title: 'Add Purchase',
     sub: 'Upload the supplier bill and check what we read — nothing reaches your stock until you confirm.',
-    back: { href: '#/purchases', label: 'Purchase History' },
   })}
 
       <ol class="steps">

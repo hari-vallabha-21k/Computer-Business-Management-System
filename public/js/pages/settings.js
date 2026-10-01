@@ -14,26 +14,23 @@
     ['prefs', 'Preferences'],
   ];
 
-  async function render(view) {
+  /**
+   * Every setting on one scrolling page, in labelled sections. There is no
+   * side menu to find things in: you scroll until you see the heading.
+   * `embedded` leaves off the page title, for the Admin page that holds it.
+   */
+  async function render(view, { embedded = false } = {}) {
     if (!window.api.isAdmin()) {
       view.innerHTML = `<div class="card"><div class="empty"><h3>This page is for the owner</h3>
-        <p>Ask the owner if you need something changed here.</p>
-        <a class="btn" href="#/">Back to Dashboard</a></div></div>`;
+        <p>Ask the owner if you need something changed here.</p></div></div>`;
       return;
     }
 
-    const state = { section: sessionStorage.getItem('cbms_settings_section') || 'business' };
     let data = await window.api.get('/api/settings');
 
     view.innerHTML = `
-      ${pageHead({ title: 'Settings', sub: 'Set these up once. Everything else uses them automatically.' })}
-      <div class="settings-layout">
-        <nav class="settings-nav">
-          ${SECTIONS.map(([key, label]) =>
-    `<button data-section="${key}" class="${state.section === key ? 'active' : ''}">${label}</button>`).join('')}
-        </nav>
-        <div class="settings-body" id="section"></div>
-      </div>`;
+      ${embedded ? '' : pageHead({ title: 'Settings', sub: 'Set these up once. Everything else uses them automatically.' })}
+      ${SECTIONS.map(([key]) => `<div id="section-${key}" style="margin-top:22px"></div>`).join('')}`;
 
     const save = async (values, message = 'Settings saved.') => {
       try {
@@ -55,7 +52,7 @@
       business: () => {
         const s = data.settings;
         return `
-          <form class="card" id="form">
+          <form class="card" data-settings-form>
             <div class="card-head"><div><h2>Business Details</h2>
               <p>Printed at the top of every invoice.</p></div></div>
             <div class="pad" style="display:flex;flex-direction:column;gap:18px">
@@ -84,7 +81,7 @@
       invoice: () => {
         const s = data.settings;
         return `
-          <form class="card" id="form">
+          <form class="card" data-settings-form>
             <div class="card-head"><div><h2>Invoice Settings</h2>
               <p>How your invoices are numbered and what they say.</p></div></div>
             <div class="pad" style="display:flex;flex-direction:column;gap:18px">
@@ -225,7 +222,7 @@
       prefs: () => {
         const s = data.settings;
         return `
-          <form class="card" id="form">
+          <form class="card" data-settings-form>
             <div class="card-head"><h2>Preferences</h2></div>
             <div class="pad" style="display:flex;flex-direction:column;gap:18px">
               <div>
@@ -248,23 +245,21 @@
       },
     };
 
-    const host = view.querySelector('#section');
-
-    const renderSection = async () => {
-      sessionStorage.setItem('cbms_settings_section', state.section);
+    const renderSection = async (key) => {
+      const host = view.querySelector(`#section-${key}`);
       host.innerHTML = skeleton(4);
-      host.innerHTML = await sections[state.section]();
+      host.innerHTML = await sections[key]();
 
-      const form = host.querySelector('#form');
+      const form = host.querySelector('[data-settings-form]');
       if (form) {
         form.addEventListener('submit', async (e) => {
           e.preventDefault();
           await save(formValues(form));
-          if (state.section === 'invoice' || state.section === 'prefs') renderSection();
+          if (key === 'invoice' || key === 'prefs') renderSection(key);
         });
       }
 
-      if (state.section === 'prefs') {
+      if (key === 'prefs') {
         host.querySelectorAll('[data-size]').forEach((b) => b.addEventListener('click', () => {
           host.querySelectorAll('[data-size]').forEach((x) => x.classList.toggle('active', x === b));
           host.querySelector('[name=text_size]').value = b.dataset.size;
@@ -272,7 +267,7 @@
         }));
       }
 
-      if (state.section === 'tax') {
+      if (key === 'tax') {
         host.querySelector('#gstin-form').addEventListener('submit', async (e) => {
           e.preventDefault();
           await save(formValues(e.target), 'GSTIN saved.');
@@ -290,7 +285,7 @@
         });
       }
 
-      if (state.section === 'users') {
+      if (key === 'users') {
         host.querySelectorAll('[data-permission]').forEach((box) => box.addEventListener('change', async () => {
           const key = box.dataset.permission;
           const ok = await save({ staff_permissions: { [key]: box.checked } },
@@ -324,7 +319,7 @@
               return true;
             },
           });
-          if (saved) { toast('User updated.'); renderSection(); }
+          if (saved) { toast('User updated.'); renderSection(key); }
         }));
 
         host.querySelector('#add-user').addEventListener('click', async () => {
@@ -341,11 +336,11 @@
                 <option value="STAFF">Sales Staff</option><option value="ADMIN">Owner / Admin</option></select></label>`,
             onConfirm: (root) => window.api.post('/api/users', formValues(root)),
           });
-          if (created) { toast('User created.'); renderSection(); }
+          if (created) { toast('User created.'); renderSection(key); }
         });
       }
 
-      if (state.section === 'backup') {
+      if (key === 'backup') {
         host.querySelector('#backup-now').addEventListener('click', async () => {
           try {
             const stamp = new Date().toISOString().slice(0, 10);
@@ -356,12 +351,7 @@
       }
     };
 
-    view.querySelectorAll('[data-section]').forEach((b) => b.addEventListener('click', () => {
-      state.section = b.dataset.section;
-      view.querySelectorAll('[data-section]').forEach((x) => x.classList.toggle('active', x === b));
-      renderSection();
-    }));
-    await renderSection();
+    for (const [key] of SECTIONS) await renderSection(key);
   }
 
   window.Pages = window.Pages || {};

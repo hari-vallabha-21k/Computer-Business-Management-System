@@ -83,21 +83,36 @@ npm test          # business rules, scanning, multi-invoice, invoice template, s
 No build step, no framework: an Express API over SQLite, and a vanilla-JS single page
 app served as static files.
 
-### The interface
+### The interface: hub and spoke
 
-The screens follow the **Retail Manager** design: a dark sidebar whose sections open
-onto their own pages, a topbar with one search box across products, invoices, customers
-and serial numbers, and one set of patterns everywhere.
+The shop's owner is not a software user, so the app has no menu to learn. There is one
+**Hub** — the Dashboard — holding a large labelled button for each job, and every other
+page is a **spoke** that does one thing and offers one way out: a big
+**⬅️ Back to Dashboard** button, always first on the page, always in the same place.
+
+| The Hub | Goes to |
+|---|---|
+| 🛒 New Sale (Create Bill) | `#/sales/new` |
+| 📜 Search Past Bills & Returns | `#/sales/history` |
+| 📦 Enter Supplier Bill (Add Stock) | `#/inventory/add` |
+| 📋 View Current Inventory | `#/inventory/list` |
+| 📒 Address Book (Contacts) | `#/contacts` — customers and suppliers in one list |
+| ⚙️ Admin, Reports & Settings | `#/admin` — owner only; buttons on top, every setting below |
+
+There is no sidebar, no navigation bar, no tabs and no hidden menus, so nothing can be
+clicked by accident and no feature can be somewhere the owner has to remember. A page
+that used to carry tabs is now one scroll of labelled sections. Old addresses such as
+`#/sales/create` or `#/customers/3` still work: they land on the page that replaced them.
 
 | Pattern | Rule |
 |---|---|
-| Actions | One primary button per page, top right. Everything secondary is a plain link; rare actions live in a **More ⋮** menu, and red buttons appear only inside a confirmation dialog. |
-| Rows | Table rows are clickable — no "View" buttons. |
+| Actions | Spelled out as buttons you can read. Nothing hides behind a **More ⋮** menu; red buttons still confirm before they do anything. |
+| Rows | Table rows are clickable, and the two commonest actions sit on the row as buttons. Everything else lives on the page the row opens. |
 | Status | Always text plus colour: In Stock, Low Stock, Out of Stock, Issued, Draft, Cancelled, Needs review. |
 | Auto-filled data | Shown in a blue panel that says where it came from, so nothing is typed twice. |
 | Loading | Skeletons of the answer, never a full-screen spinner. |
 | Errors | Plain language, what happened, and what to do next. |
-| Phones | Under 900px the sidebar becomes a drawer, tables become cards, and touch targets grow. |
+| Phones | Under 900px the Hub stacks to one column, tables become cards, and touch targets grow. |
 | Text size | Settings → Preferences offers Normal / Large / Extra large for reading across the counter. |
 
 Type is Cormorant Garamond for page titles and DM Sans for everything else, loaded from

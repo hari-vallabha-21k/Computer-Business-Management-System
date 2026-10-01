@@ -215,59 +215,32 @@
     </div></div>`;
 
   /**
-   * A "More ⋮" menu. `items` are {label, action, danger, sep}; the action name
-   * comes back through the data-action attribute for the page to handle.
+   * Buttons you can read, in place of a hidden "more" menu. `items` are
+   * {label, action, danger}; the action name comes back through data-action.
+   * Keep it to two or three per row — anything rarer belongs on the page the
+   * row opens.
    */
-  const moreMenu = (items, label = 'More ⋮') => `
-    <div class="menu-wrap">
-      <button class="btn ${label === '⋮' ? 'ghost icon' : ''}" data-menu-toggle
-        aria-label="More actions">${label}</button>
-      <div class="menu" hidden>
-        ${items.map((i) => (i.sep ? '<div class="sep"></div>'
-    : `<button data-action="${i.action}" class="${i.danger ? 'danger' : ''}">${esc(i.label)}</button>`)).join('')}
-      </div>
-    </div>`;
+  const rowActions = (items) => `<div class="row-actions">${items.filter(Boolean).map((i) =>
+    `<button type="button" class="btn small ${i.danger ? 'danger' : ''}" data-action="${esc(i.action)}">${esc(i.label)}</button>`).join('')}</div>`;
 
-  /** Wire every menu inside `root`, calling handlers[action]() on a choice. */
-  function wireMenus(root, handlers) {
-    root.querySelectorAll('[data-menu-toggle]').forEach((button) => {
-      const menu = button.parentElement.querySelector('.menu');
+  /** Wire every row button inside `root`, calling handlers[action](row). */
+  function wireRowActions(root, handlers) {
+    root.querySelectorAll('.row-actions [data-action]').forEach((button) => {
       button.addEventListener('click', (e) => {
         e.stopPropagation();
-        const wasOpen = !menu.hidden;
-        root.querySelectorAll('.menu').forEach((m) => { m.hidden = true; });
-        menu.hidden = wasOpen;
-      });
-      menu.querySelectorAll('[data-action]').forEach((item) => item.addEventListener('click', (e) => {
-        e.stopPropagation();
-        menu.hidden = true;
-        const handler = handlers[item.dataset.action];
+        const handler = handlers[button.dataset.action];
         if (handler) handler(button.closest('[data-id]'));
-      }));
+      });
     });
   }
-
-  // One document-level listener closes whichever menu is open; wiring a page
-  // no longer adds another, so nothing piles up as you move between pages.
-  document.addEventListener('click', () => {
-    document.querySelectorAll('.menu-wrap .menu').forEach((m) => { m.hidden = true; });
-  });
 
   /** Clickable rows: wire every element carrying data-href. */
   function wireLinks(root) {
     root.querySelectorAll('[data-href]').forEach((el) => el.addEventListener('click', (e) => {
-      if (e.target.closest('[data-menu-toggle]') || e.target.closest('.menu') || e.target.closest('a')) return;
+      if (e.target.closest('.row-actions') || e.target.closest('button') || e.target.closest('a')) return;
       window.location.hash = el.dataset.href;
     }));
   }
-
-  /** Tab strip; calls onSelect(key) without re-rendering the whole page. */
-  function tabs(items, active) {
-    return `<div class="tabs">${items.map(([key, label]) =>
-    `<button data-tab="${esc(key)}" class="${key === active ? 'active' : ''}">${esc(label)}</button>`).join('')}</div>`;
-  }
-  const wireTabs = (root, onSelect) => root.querySelectorAll('[data-tab]')
-    .forEach((b) => b.addEventListener('click', () => onSelect(b.dataset.tab)));
 
   /**
    * Type-ahead product search box. Calls onSelect(product).
@@ -460,7 +433,7 @@
     esc, money, moneyShort, rupees, plural, qty, date, dateTime, iso, todayIso, range, statusTag, stockTag, stockState,
     MOVEMENT_LABEL, inWords, rupeesInWords,
     toast, errorToast, modal, confirm, table, kpi, tiles, loading, skeleton, pageHead, emptyState,
-    moreMenu, wireMenus, wireLinks, tabs, wireTabs,
+    rowActions, wireRowActions, wireLinks,
     productSearch, partySearch, quickAddParty, formValues,
   };
 })();

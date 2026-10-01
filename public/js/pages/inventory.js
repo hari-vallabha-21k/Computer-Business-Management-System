@@ -5,7 +5,7 @@
   const {
     esc, money, rupees, qty, date, dateTime, table, loading, skeleton, toast, errorToast, modal, confirm,
     statusTag, stockTag, stockState, MOVEMENT_LABEL, productSearch, partySearch, formValues,
-    pageHead, tiles, tabs, wireTabs, wireLinks, moreMenu, wireMenus, emptyState,
+    pageHead, tiles, wireLinks, rowActions, wireRowActions, emptyState,
   } = window.ui;
 
   const SEARCH_ICON = `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A4843"
@@ -23,7 +23,7 @@
       ${pageHead({
     title: 'Inventory',
     sub: "See what's on your shelves and what needs reordering.",
-    actions: '<a class="btn primary" href="#/inventory/add-stock">+ Add Stock</a>',
+    actions: '<a class="btn primary" href="#/inventory/add">+ Add Stock</a>',
   })}
       <div class="filters">
         ${searchField('q', 'Search products…')}
@@ -69,7 +69,7 @@
         if (action) {
           action.addEventListener('click', (e) => {
             e.stopPropagation();
-            window.location.hash = `#/inventory/add-stock?product=${tr.dataset.href.split('/').pop()}`;
+            window.location.hash = `#/inventory/add?product=${tr.dataset.href.split('/').pop()}`;
           });
         }
       });
@@ -155,39 +155,15 @@
     { label: 'Status', noLabel: true, render: (p) => stockTag(p) },
     {
       label: '', noLabel: true,
-      render: () => moreMenu([
-        { label: 'View details', action: 'view' },
-        { label: 'Edit product', action: 'edit' },
-        { label: 'Add stock', action: 'stock' },
-        { label: 'Adjust stock', action: 'adjust' },
-        ...(window.api.isAdmin() ? [{ sep: true }, { label: 'Delete product', action: 'delete', danger: true }] : []),
-      ], '⋮'),
+      render: () => rowActions([{ label: 'Open', action: 'view' }, { label: 'Add stock', action: 'stock' }]),
     },
   ], { rowAttrs: (p) => `data-id="${p.id}" data-href="#/inventory/product/${p.id}"` })}
         <div class="table-foot"><span>Showing ${rows.length} product${rows.length === 1 ? '' : 's'}</span></div>`;
 
       wireLinks(list);
-      wireMenus(list, {
+      wireRowActions(list, {
         view: (row) => { window.location.hash = `#/inventory/product/${row.dataset.id}`; },
-        edit: (row) => { window.location.hash = `#/inventory/add-product/${row.dataset.id}`; },
-        stock: (row) => { window.location.hash = `#/inventory/add-stock?product=${row.dataset.id}`; },
-        adjust: (row) => { window.location.hash = `#/inventory/adjust?product=${row.dataset.id}`; },
-        delete: async (row) => {
-          const product = rows.find((p) => String(p.id) === row.dataset.id);
-          const ok = await modal({
-            title: `Delete ${product.name}?`,
-            confirmLabel: 'Delete Product',
-            danger: true,
-            body: `<p>It will be removed from your product list. Past invoices and purchases stay unchanged.</p>`,
-            onConfirm: () => true,
-          });
-          if (!ok) return;
-          try {
-            await window.api.del(`/api/products/${product.id}`);
-            toast(`${product.name} deleted.`);
-            load();
-          } catch (err) { errorToast(err); }
-        },
+        stock: (row) => { window.location.hash = `#/inventory/add?product=${row.dataset.id}`; },
       });
     };
 
@@ -411,7 +387,7 @@
     const isService = service || !!(p && p.item_type === 'SERVICE');
     const back = isService
       ? { href: '#/inventory/services', label: 'Services' }
-      : { href: '#/inventory/products', label: 'Products' };
+      : { href: '#/inventory/list', label: 'Products' };
     const noun = isService ? 'Service' : 'Product';
 
     view.innerHTML = `
@@ -490,17 +466,17 @@
         { label: 'Charge', num: true, render: (p) => money(p.selling_price) },
         ...(admin ? [{
           label: '', noLabel: true,
-          render: () => moreMenu([
-            { label: 'Edit service', action: 'edit' },
-            { sep: true }, { label: 'Delete service', action: 'delete', danger: true },
-          ], '⋮'),
+          render: () => rowActions([
+            { label: 'Edit', action: 'edit' },
+            { label: 'Delete', action: 'delete', danger: true },
+          ]),
         }] : []),
       ], { rowAttrs: (p) => `data-id="${p.id}"${admin ? ` data-href="#/inventory/add-service/${p.id}"` : ''}` })}
         <div class="table-foot"><span>Showing ${rows.length} service${rows.length === 1 ? '' : 's'}</span></div>`
         : `<div class="empty"><h3>No services yet</h3>
             <p>Add the work you charge for, such as installation or repairs, to bill it on invoices.</p></div>`;
       wireLinks(list);
-      wireMenus(list, {
+      wireRowActions(list, {
         edit: (row) => { window.location.hash = `#/inventory/add-service/${row.dataset.id}`; },
         delete: async (row) => {
           const service = rows.find((p) => String(p.id) === row.dataset.id);
@@ -573,7 +549,7 @@
 
     function manual() {
       flow.innerHTML = `
-        <a class="back-link" id="back-choose" href="#/inventory/add-stock">← Choose another way</a>
+        <a class="back-link" id="back-choose" href="#/inventory/add">← Choose another way</a>
         <div style="max-width:720px">
           <form class="card" id="form">
             <div class="pad" style="display:flex;flex-direction:column;gap:18px">
@@ -669,7 +645,7 @@
           <p>Purchase ${esc(res.purchaseNo)} is saved. ${esc(selected.name)} is now at ${qty(res.balance)}.</p>
           <div class="btn-row" style="justify-content:center">
             <a href="#/inventory/product/${selected.id}">View product</a>
-            <a href="#/inventory/add-stock" id="again">Add more stock</a>
+            <a href="#/inventory/add" id="again">Add more stock</a>
             <a href="#/inventory">Go to Inventory</a>
           </div>
         </div>`;
@@ -741,7 +717,6 @@
         ${pageHead({
     title: 'Adjust Stock',
     sub: "Use this when the count on the shelf doesn't match the system.",
-    back: { href: '#/inventory/movements', label: 'Stock Movements' },
   })}
         <form class="card" id="form">
           <div class="pad" style="display:flex;flex-direction:column;gap:18px">
@@ -840,7 +815,7 @@
           </div>
         </div>
         <span class="tag ${p.stock <= 0 ? 'red' : 'amber'}">${p.stock <= 0 ? 'Out of Stock' : 'Low Stock'}</span>
-        <a href="#/inventory/add-stock?product=${p.id}">Add stock →</a>
+        <a href="#/inventory/add?product=${p.id}">Add stock →</a>
       </div>`).join('')
       : `<div class="empty"><h3>Everything is in stock</h3>
           <p>Products fall into this list when they reach their minimum level.</p>
@@ -924,12 +899,6 @@
     const p = data.product;
     const admin = window.api.isAdmin();
     const showCosts = window.api.can('costs');
-    const state = { tab: 'overview' };
-
-    const tabList = [['overview', 'Overview'], ['history', 'Stock History'], ['sales', 'Sales']];
-    if (admin) tabList.push(['purchases', 'Purchases']);
-    if (p.serial_tracked) tabList.push(['serials', 'Serial Numbers']);
-
     const facts = [
       ['Brand', p.brand || '—'], ['Model', p.model || '—'], ['Category', p.category || 'Uncategorised'],
       ['HSN code', p.hsn_code || '—'], ['GST', `${p.gst_rate}%`], ['Selling price', money(p.selling_price)],
@@ -944,14 +913,12 @@
       ${pageHead({
     title: `${esc(p.name)} ${stockTag(p)}`,
     sub: `Product ID ${esc(p.product_code)} · ${esc(p.category || 'Uncategorised')}`,
-    back: { href: '#/inventory/products', label: 'Products' },
-    actions: moreMenu([
-      ...(admin ? [{ label: 'Edit product', action: 'edit' }] : []),
-      { label: 'Add stock', action: 'stock' },
-      ...(admin ? [{ label: 'Adjust stock', action: 'adjust' }] : []),
-      { label: 'Sell this product', action: 'sell' },
-      ...(admin ? [{ sep: true }, { label: 'Delete product', action: 'delete', danger: true }] : []),
-    ]),
+    actions: `
+      <button class="btn primary" data-do="sell">Sell this product</button>
+      <button class="btn" data-do="stock">Add stock</button>
+      ${admin ? `<button class="btn" data-do="edit">Edit product</button>
+        <button class="btn" data-do="adjust">Correct stock count</button>
+        <button class="btn danger" data-do="delete">Delete product</button>` : ''}`,
   })}
       ${tiles([
     { label: 'Current Stock', value: qty(p.stock) },
@@ -963,20 +930,33 @@
         <div class="alert warn"><span class="glyph">!</span>
           <div>The ledger totals ${qty(data.ledgerStock)} but the product shows ${qty(p.stock)}. Ask for a stock check.</div>
         </div>` : ''}
-      ${tabs(tabList, state.tab)}
-      <div id="tab-body"></div>`;
-
-    const body = view.querySelector('#tab-body');
-
-    const renderTab = () => {
-      if (state.tab === 'overview') {
-        body.innerHTML = `<div class="card"><div class="facts">
+      <div class="page-section">
+        <h2>Details</h2>
+        <div class="card"><div class="facts">
           ${facts.map(([k, v]) => `<div><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`).join('')}
-        </div></div>`;
-        return;
-      }
-      if (state.tab === 'history') {
-        body.innerHTML = `<div class="card">${table(data.movements, [
+        </div></div>
+      </div>
+
+      <div class="page-section">
+        <h2>Stock History</h2>
+        <div id="sec-history"></div>
+      </div>
+      <div class="page-section">
+        <h2>Sales</h2>
+        <div id="sec-sales"></div>
+      </div>
+      ${admin ? `<div class="page-section">
+        <h2>Purchases</h2>
+        <div id="sec-purchases"></div>
+      </div>` : ''}
+      ${p.serial_tracked ? `<div class="page-section">
+        <h2>Serial Numbers</h2>
+        <div id="sec-serials"></div>
+      </div>` : ''}`;
+
+    const section = (id) => view.querySelector(`#${id}`);
+
+    section('sec-history').innerHTML = `<div class="card">${table(data.movements, [
           { label: 'Date', render: (m) => dateTime(m.created_at) },
           {
             label: 'Type',
@@ -985,51 +965,38 @@
           { label: 'Quantity', num: true, render: (m) => `${m.qty > 0 ? '+' : ''}${qty(m.qty)}` },
           { label: 'Stock after', num: true, render: (m) => qty(m.balance_after) },
           { label: 'Reference', class: 'doc', render: (m) => esc(m.reference_no || '—') },
-        ], { empty: 'Nothing has moved yet.', clickable: false })}</div>`;
-        return;
-      }
-      if (state.tab === 'sales') {
-        body.innerHTML = `<div class="card">${table(data.sales, [
+    ], { empty: 'Nothing has moved yet.', clickable: false })}</div>`;
+
+    section('sec-sales').innerHTML = `<div class="card">${table(data.sales, [
           { label: 'Invoice', class: 'doc', render: (s) => esc(s.invoice_no) },
           { label: 'Customer', render: (s) => esc(s.customer_name || 'Walk-in') },
           { label: 'Date', render: (s) => date(s.invoice_date) },
           { label: 'Qty', num: true, render: (s) => qty(s.qty) },
           { label: 'Amount', num: true, render: (s) => money(s.total) },
-        ], { rowAttrs: (s) => `data-href="#/sales/invoice/${s.invoice_id}"`, empty: 'This product has not been sold yet.' })}</div>`;
-        wireLinks(body);
-        return;
-      }
-      if (state.tab === 'purchases') {
-        body.innerHTML = `<div class="card">${table(data.purchases, [
+    ], { rowAttrs: (s) => `data-href="#/sales/invoice/${s.invoice_id}"`, empty: 'This product has not been sold yet.' })}</div>`;
+
+    if (section('sec-purchases')) section('sec-purchases').innerHTML = `<div class="card">${table(data.purchases, [
           { label: 'Purchase #', class: 'doc', render: (r) => esc(r.purchase_no) },
           { label: 'Supplier', render: (r) => esc(r.supplier_name || '—') },
           { label: 'Date', render: (r) => date(r.invoice_date) },
           { label: 'Qty', num: true, render: (r) => qty(r.qty) },
           { label: 'Rate', num: true, render: (r) => money(r.unit_price) },
-        ], { rowAttrs: (r) => `data-href="#/purchases/${r.purchase_id}"`, empty: 'No purchases recorded for this product.' })}</div>`;
-        wireLinks(body);
-        return;
-      }
-      body.innerHTML = `<div class="card">${table(data.serials, [
+    ], { rowAttrs: (r) => `data-href="#/purchases/${r.purchase_id}"`, empty: 'No purchases recorded for this product.' })}</div>`;
+
+    if (section('sec-serials')) section('sec-serials').innerHTML = `<div class="card">${table(data.serials, [
         { label: 'Serial number', render: (s) => `<strong>${esc(s.serial)}</strong>` },
         { label: 'Status', noLabel: true, render: (s) => statusTag(s.status) },
         { label: 'Invoice', class: 'doc', render: (s) => esc(s.invoice_no || '—') },
         { label: 'Purchased', render: (s) => (s.purchased_on ? date(s.purchased_on) : date(s.created_at)) },
-      ], { empty: 'No serial numbers recorded for this product.', clickable: false })}</div>`;
-    };
+    ], { empty: 'No serial numbers recorded for this product.', clickable: false })}</div>`;
 
-    wireTabs(view, (tab) => {
-      state.tab = tab;
-      view.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-      renderTab();
-    });
-    renderTab();
+    wireLinks(view);
 
-    wireMenus(view, {
+    const actions = {
       edit: () => { window.location.hash = `#/inventory/add-product/${p.id}`; },
-      stock: () => { window.location.hash = `#/inventory/add-stock?product=${p.id}`; },
+      stock: () => { window.location.hash = `#/inventory/add?product=${p.id}`; },
       adjust: () => { window.location.hash = `#/inventory/adjust?product=${p.id}`; },
-      sell: () => { window.location.hash = `#/sales/create?product=${p.id}`; },
+      sell: () => { window.location.hash = `#/sales/new?product=${p.id}`; },
       delete: async () => {
         const ok = await modal({
           title: `Delete ${p.name}?`,
@@ -1042,10 +1009,11 @@
         try {
           await window.api.del(`/api/products/${p.id}`);
           toast(`${p.name} deleted.`);
-          window.location.hash = '#/inventory/products';
+          window.location.hash = '#/inventory/list';
         } catch (err) { errorToast(err); }
       },
-    });
+    };
+    view.querySelectorAll('[data-do]').forEach((b) => b.addEventListener('click', () => actions[b.dataset.do]()));
   }
 
   async function hsn(view) {
@@ -1053,7 +1021,6 @@
       ${pageHead({
     title: 'HSN Codes',
     sub: 'HSN classifies goods for tax. Products carry an HSN; invoices pick it up automatically.',
-    back: { href: '#/settings', label: 'Settings' },
     actions: window.api.isAdmin() ? '<button class="btn primary" id="add">+ Add HSN</button>' : '',
   })}
       <div class="filters">${searchField('q', 'Search by code or description…')}</div>
@@ -1248,7 +1215,7 @@
           }));
           const res = await window.api.post('/api/products/bulk', { items: payload });
           toast(`${res.createdCount} product(s) created${res.skippedCount ? `, ${res.skippedCount} skipped as duplicates` : ''}.`, 'success');
-          window.location.hash = '#/inventory/products';
+          window.location.hash = '#/inventory/list';
           return;
         }
 
@@ -1287,7 +1254,7 @@
           if (!res.purchaseNo) throw new Error('The purchase could not be recorded.');
         }
         toast(`${products} product(s) created and stock added from ${purchases} invoice(s).`, 'success');
-        window.location.hash = '#/inventory/products';
+        window.location.hash = '#/inventory/list';
       } catch (err) { errorToast(err); }
     }
   }
