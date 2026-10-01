@@ -157,6 +157,9 @@
   }
 
   async function route() {
+    // Signing out moves the address back to the Dashboard. There is nobody to
+    // draw it for, and every request it made would come back 401, so stop.
+    if (!window.api.state.user) return;
     // Every visit gets a fresh view element. A page still waiting on the
     // server when the next one starts keeps writing to the old element, which
     // is no longer in the document, so a slow page can never paint over the
@@ -250,7 +253,7 @@
           {
             title: 'Customers',
             items: customers.customers.map((c) => ({
-              href: `#/customers/${c.id}`, label: c.name, meta: c.phone || `${c.transactions} invoice(s)`,
+              href: `#/contacts/customer/${c.id}`, label: c.name, meta: c.phone || `${c.transactions} invoice(s)`,
             })),
           },
           {

@@ -188,7 +188,7 @@
   function productFormHtml(p, { categories, brands, service = false, name = '', stockNote = '' }) {
     const noun = service ? 'Service' : 'Product';
     return `
-        <form class="card product-form" id="form">
+        <form class="card product-form">
           <input type="hidden" name="item_type" value="${service ? 'SERVICE' : 'PRODUCT'}">
           <div class="form-section">
             <span class="section-label">${noun} Information</span>
@@ -587,7 +587,7 @@
               </div>
             </div>
             <div class="card-foot">
-              <a class="link-btn quiet" href="#/inventory">Cancel</a>
+              <a class="link-btn quiet" href="#/inventory/list">Cancel</a>
               <button class="btn primary" type="submit" id="submit" disabled>Add Stock</button>
             </div>
           </form>
@@ -656,7 +656,7 @@
           <div class="btn-row" style="justify-content:center">
             <a href="#/inventory/product/${selected.id}">View product</a>
             <a href="#/inventory/add" id="again">Add more stock</a>
-            <a href="#/inventory">Go to Inventory</a>
+            <a href="#/inventory/list">Go to Inventory</a>
           </div>
         </div>`;
         flow.querySelector('#again').addEventListener('click', (e) => { e.preventDefault(); manual(); });
@@ -830,7 +830,7 @@
       </div>`).join('')
       : `<div class="empty"><h3>Everything is in stock</h3>
           <p>Products fall into this list when they reach their minimum level.</p>
-          <a class="btn" href="#/inventory">Back to Inventory</a></div>`;
+          <a class="btn" href="#/inventory/list">Back to Inventory</a></div>`;
     wireLinks(list);
   }
 

@@ -33,6 +33,8 @@
     }
     if (res.status === 401 && !options.allowAnonymous) {
       state.token = null;
+      state.user = null;
+      state.permissions = {};
       localStorage.removeItem('cbms_token');
       window.dispatchEvent(new CustomEvent('cbms:signed-out'));
       throw new ApiError('Your session has expired. Please sign in again.', 401);

@@ -465,7 +465,7 @@
           <div class="btn-row" style="justify-content:center">
             <a href="#/purchases/${res.purchaseId}">View purchase</a>
             <a href="#/purchases/add">Add more stock</a>
-            <a href="#/inventory">Go to Inventory</a>
+            <a href="#/inventory/list">Go to Inventory</a>
           </div>
         </div>`;
       } catch (err) { errorToast(err); }

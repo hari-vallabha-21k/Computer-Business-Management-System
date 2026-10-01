@@ -106,8 +106,9 @@ a:hover { color: var(--primary-dark); text-decoration: underline; }
   height: 68px; background: var(--surface); border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 16px; padding: 0 20px; position: sticky; top: 0; z-index: 30;
 }
-.brand { display: flex; align-items: center; gap: 10px; flex: none; }
+.brand { display: flex; align-items: center; gap: 10px; flex: none; min-width: 0; }
 .brand .name { font-family: var(--serif); font-size: 21px; font-weight: 600; line-height: 1.1; }
+#home-link { flex: none; gap: 8px; }
 
 .user-chip { display: flex; align-items: center; gap: 10px; flex: none; }
 .user-chip .avatar {
@@ -162,11 +163,11 @@ a:hover { color: var(--primary-dark); text-decoration: underline; }
   cursor: pointer; text-decoration: none;
 }
 .back-home:hover, .back-home:focus-visible { background: var(--primary-dark); border-color: var(--primary-dark); color: #fff; text-decoration: none; }
-.global-search { position: relative; flex: 1; max-width: 480px; }
+.global-search { position: relative; flex: 1 1 120px; min-width: 0; max-width: 480px; }
 .global-search input { height: var(--control); width: 100%; padding-left: 40px; background: var(--surface-2); }
 .global-search input:focus { background: var(--surface); }
 .global-search .icon { position: absolute; left: 12px; top: 13px; pointer-events: none; }
-.topbar-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.topbar-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; flex: none; }
 .topbar .today { font-size: 14px; color: var(--muted); }
 
 .search-results, .pick-list, .menu {
@@ -539,9 +540,13 @@ tfoot td { font-weight: 600; border-top: 2px solid var(--border); border-bottom:
 
 /* ---------- Phone ---------- */
 @media (max-width: 900px) {
-  .topbar { padding: 0 12px; gap: 10px; }
+  /* The strip has to fit a phone: the shop's name, the word on the home
+     button and the user's name all give way before the search box does. */
+  .topbar { padding: 0 12px; gap: 10px; flex-wrap: nowrap; }
   .topbar .today { display: none; }
   .user-chip .who { display: none; }
+  .brand .name { display: none; }
+  .topbar-actions { gap: 6px; }
   .hub-btn { min-height: 96px; padding: 18px; gap: 14px; }
   .hub-btn .hub-icon { width: 52px; height: 52px; font-size: 26px; }
   .hub-btn .hub-label { font-size: 19px; }
@@ -664,6 +669,11 @@ tfoot td { font-weight: 600; border-top: 2px solid var(--border); border-bottom:
 .pay-row:last-child { border-bottom: 0; }
 .pay-row-main { flex: 1; min-width: 0; }
 .pay-row-main > div:first-child { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+
+@media (max-width: 620px) {
+  #home-link span { display: none; }
+  #home-link { padding: 0 12px; font-size: 18px; }
+}
 
 @media (max-width: 600px) {
   .pay-summary { grid-template-columns: 1fr; }
